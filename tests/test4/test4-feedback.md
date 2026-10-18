@@ -1,0 +1,3 @@
+# Test 4 - Feedback
+
+Everything looks great for matching, see app-match-endings.PNG, except for one problem. In the photo 65-59 do not match. I want to penalize when the endings of the edge do not match, this is a heuristic I've noticed from puzzles which can be quite useful to tell that a piece is not a match. It's obvious from the image and my guess from the edge ends matching that we can discard the 65-59 byt means of checking the endings of the edge match. In all other cases from the image the last point of the edge matched almost perfectly the other endings of the paired edge. So we should tweak the algorithm to consider this.
