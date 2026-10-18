@@ -1,5 +1,5 @@
 import { Scanner } from './scan/scanner.js';
-import { pieceSvg, pairSvg, svgEl, pathData, placement, bodySize, SIDE_COLORS } from './shapes.js';
+import { pieceSvg, pairSvg, svgEl, pathData, placement, bodySize, topFor, SIDE_COLORS } from './shapes.js';
 
 const app = document.getElementById('app');
 const dialog = document.getElementById('dialog');
@@ -176,7 +176,7 @@ async function importDemo() {
   const worker = async () => {
     while (queue.length) {
       const piece = queue.shift();
-      const summary = await api(`/puzzles/${state.id}/pieces`, { method: 'POST', json: { label: piece.label, contour: piece.contour, scale: piece.scale, quality: { engine: 'demo' } } });
+      const summary = await api(`/puzzles/${state.id}/pieces`, { method: 'POST', json: { label: piece.label, contour: piece.contour, sizeMm: piece.sizeMm, quality: { engine: 'demo' } } });
       state.pieces.set(summary.index, summary);
       state.nextLabel = summary.nextLabel;
       done++;
@@ -265,7 +265,7 @@ function renderScanResult(summary, still) {
       h('p', { class: 'hint' }, 'Hold the phone flat, keep the whole piece in view and retake.'));
   }
   return h('div', { class: 'result-card' },
-    h('div', { class: 'result-images' }, still, pieceSvg(summary, { zoom: 0.36, sides: true })),
+    h('div', { class: 'result-images' }, still, pieceSvg(summary, { zoom: 5.4, sides: true })),
     info);
 }
 
@@ -288,7 +288,7 @@ function renderPieces() {
     return p.ok && p.kind === state.filter;
   });
   grid.replaceChildren(...visible.map((piece) => h('button', { class: 'piece-card' + (piece.ok ? '' : ' failed'), onclick: () => showPieceDetails(piece.index) },
-    pieceSvg(piece, { zoom: 0.17 }),
+    pieceSvg(piece, { zoom: 2.5 }),
     h('span', { class: 'piece-number' }, piece.label),
     piece.ok ? h('span', { class: 'badge ' + piece.kind }, piece.kind) : h('span', { class: 'badge failed' }, 'failed'),
   )));
@@ -314,12 +314,12 @@ async function showPieceDetails(index) {
   labelInput.addEventListener('change', saveLabel);
   const q = piece.quality || {};
   const qualityText = q.engine === 'demo' ? 'Demo piece (traced from a flatbed scan).'
-    : q.frames ? `Fused from ${q.used} of ${q.frames} frames · frame-to-frame deviation ${q.deviation}% · ${q.pixelsPerPiece}px piece size · ${q.engine === 'sam' ? 'AI segmentation' : 'color segmentation'}${q.card ? ' · measured on the scan card' + (piece.sizeMm ? ` (${(piece.sizeMm).toFixed(1)} mm)` : '') : ' · size normalized (no scan card)'}` : '';
+    : q.frames ? `Fused from ${q.used} of ${q.frames} frames · frame-to-frame deviation ${q.deviation}% · ${Math.round(q.pixelsPerPiece)} px piece size${piece.measured ? ` · measured on the scan card (${piece.sizeMm.toFixed(1)} mm)` : ' · size not measured'}` : '';
 
   const actions = h('div', { class: 'dialog-actions' },
     h('label', { class: 'label-edit' }, 'Label ', labelInput),
     h('button', { onclick: () => { dialog.close(); openScanner({ replace: index, label: piece.label }); } }, '📷 Rescan'),
-    h('button', { onclick: () => openDialog(`Piece #${piece.label}: what the analyzer saw`, h('img', { class: 'debug-image', src: `/api/puzzles/${state.id}/files/pieces/${index}_debug.png?${piece.created || ''}` }), h('p', { class: 'hint' }, 'The silhouette rebuilt from the contour. Orange crosses mark the four detected corners; the side profiles are drawn on the left.')) }, '🔍 Analysis'),
+    h('button', { onclick: () => showAnalysis(piece) }, '🔍 Analysis'),
     h('button', {
       class: 'danger',
       onclick: async () => {
@@ -334,14 +334,14 @@ async function showPieceDetails(index) {
   );
 
   if (!piece.ok) {
-    openDialog(`Piece #${piece.label} could not be analyzed`, actions, h('p', {}, piece.error || 'Unknown error'), pieceSvg(piece, { zoom: 0.5 }));
+    openDialog(`Piece #${piece.label} could not be analyzed`, actions, h('p', {}, piece.error || 'Unknown error'), pieceSvg(piece, { zoom: 7.5 }));
     return;
   }
 
   const legend = h('p', { class: 'side-list' }, piece.directions.map((d, i) => h('span', { style: { color: SIDE_COLORS[d] } }, `${i + 1}: ${SIDE_NAMES[d]}`)));
   const body = h('div', { class: 'matches' }, h('p', { class: 'muted' }, 'Comparing shapes with all other pieces…'));
   openDialog(`Piece #${piece.label} · ${piece.kind}`, actions,
-    h('div', { class: 'detail-shape' }, pieceSvg(piece, { zoom: 0.55, sides: true }), h('div', {}, legend, h('p', { class: 'muted small' }, qualityText))),
+    h('div', { class: 'detail-shape' }, pieceSvg(piece, { zoom: 8, sides: true }), h('div', {}, legend, h('p', { class: 'muted small' }, qualityText))),
     h('h3', {}, 'What fits each side'), body);
   let result;
   try {
@@ -353,7 +353,7 @@ async function showPieceDetails(index) {
   body.replaceChildren(...result.sides.map(({ side, candidates }) => {
     const direction = piece.directions[side];
     const row = h('div', { class: 'match-row' }, h('div', { class: 'match-side' },
-      pieceSvg(piece, { top: (side + 1) % 4, zoom: 0.16, highlight: side }),
+      pieceSvg(piece, { top: topFor(side, 1), zoom: 2.4, highlight: side }),
       h('span', {}, `Side ${side + 1}`), h('span', { class: 'muted' }, SIDE_NAMES[direction])));
     const list = h('div', { class: 'match-list' });
     if (direction === 'flat') {
@@ -364,13 +364,26 @@ async function showPieceDetails(index) {
     for (const candidate of candidates.slice(0, 6)) {
       const other = state.pieces.get(candidate.piece);
       if (!other || !other.ok) continue;
-      list.append(h('button', { class: 'match', onclick: () => showPieceDetails(candidate.piece) },
-        pairSvg(piece, side, other, candidate.side, 0.12),
+      list.append(h('button', { class: 'match', title: `gap ${candidate.scoreMm} mm`, onclick: () => showPieceDetails(candidate.piece) },
+        pairSvg(piece, side, other, candidate.side, 1.8),
         h('span', { class: 'match-label' }, h('strong', {}, '#' + other.label), ' ', h('span', { class: 'prob', style: { '--p': candidate.probability } }, percent(candidate.probability)))));
     }
     row.append(list);
     return row;
   }));
+}
+
+/** The analyzed outline: corners, side types and side lengths. */
+function showAnalysis(piece) {
+  const rows = piece.directions.map((d, i) => h('tr', {},
+    h('td', {}, `Side ${i + 1}`),
+    h('td', { style: { color: SIDE_COLORS[d] } }, SIDE_NAMES[d]),
+    h('td', {}, `${piece.sideLengths[i].toFixed(2)} mm`)));
+  openDialog(`Piece #${piece.label}: analysis`,
+    h('div', { class: 'detail-shape' }, pieceSvg(piece, { zoom: 10, sides: true, corners: true }),
+      h('div', {},
+        h('table', { class: 'layout-grid' }, rows),
+        h('p', { class: 'muted small' }, `Size ${piece.sizeMm?.toFixed(2)} mm (square root of the area)${piece.measured ? ', measured on the scan card' : ''}. Dots mark the four corners; sides are numbered clockwise.`))));
 }
 
 function openDialog(title, ...content) {
@@ -451,7 +464,8 @@ function renderSolution() {
     container.replaceChildren(h('p', { class: 'hint' }, 'The solver compares every side with every other side and assembles pieces into groups. With all pieces of a puzzle you ideally get one big group; with some of them you get partial groups of pieces that belong together.'));
     return;
   }
-  const zoom = Number(document.getElementById('zoom').value);
+  // the slider is in pixels per 1/15 mm (about one pixel per scan pixel of a typical piece)
+  const zoom = Number(document.getElementById('zoom').value) * 15;
   const showNumbers = document.getElementById('show-numbers').checked;
   const showLinks = document.getElementById('show-links').checked;
   const showSingles = document.getElementById('show-singles').checked;
@@ -464,7 +478,7 @@ function renderSolution() {
     const singlePieces = singles.map((index) => state.pieces.get(index)).filter(Boolean);
     nodes.push(h('div', { class: 'group' }, h('div', { class: 'group-head' }, h('h3', {}, 'Not placed'), h('span', { class: 'muted' }, singles.length + ' pieces')),
       showSingles
-        ? h('div', { class: 'piece-grid' }, singlePieces.map((piece) => h('button', { class: 'piece-card', onclick: () => showPieceDetails(piece.index) }, pieceSvg(piece, { zoom: 0.15 }), h('span', { class: 'piece-number' }, piece.label))))
+        ? h('div', { class: 'piece-grid' }, singlePieces.map((piece) => h('button', { class: 'piece-card', onclick: () => showPieceDetails(piece.index) }, pieceSvg(piece, { zoom: 2.2 }), h('span', { class: 'piece-number' }, piece.label))))
         : h('p', { class: 'muted small' }, singlePieces.map((p) => '#' + p.label).join(', '))));
   }
   container.replaceChildren(...nodes);
@@ -488,7 +502,7 @@ function renderGroup(group, groupIndex, zoom, showNumbers, showLinks) {
     const max = Math.max(...keys);
     const result = new Map();
     let pos = 0;
-    let last = 305;
+    let last = 20;
     for (let k = min; k <= max; k++) {
       const values = map.get(k);
       const size = values ? values.reduce((a, b) => a + b, 0) / values.length : last;
@@ -500,7 +514,7 @@ function renderGroup(group, groupIndex, zoom, showNumbers, showLinks) {
   };
   const cols = offsets(widths);
   const rows = offsets(heights);
-  const margin = 120;
+  const margin = 8; // mm
   const W = (cols.total + margin * 2) * zoom;
   const H = (rows.total + margin * 2) * zoom;
 
@@ -514,13 +528,14 @@ function renderGroup(group, groupIndex, zoom, showNumbers, showLinks) {
     g.addEventListener('click', () => showPieceDetails(p.piece));
     board.append(g);
     if (showNumbers) {
-      labels.append(svgEl('text', { x: x.toFixed(1), y: y.toFixed(1), class: 'piece-label', 'font-size': Math.max(7, Math.min(16, 70 * zoom)).toFixed(1) }, document.createTextNode(piece.label)));
+      labels.append(svgEl('text', { x: x.toFixed(1), y: y.toFixed(1), class: 'piece-label', 'font-size': Math.max(7, Math.min(16, 4.7 * zoom)).toFixed(1) }, document.createTextNode(piece.label)));
     }
     if (showLinks) {
       p.links.forEach((probability, direction) => {
         if (probability === null || probability === undefined) return;
-        const d = (direction + rotation * 3) % 4; // keep it on the same physical side after rotation
-        const [dx, dy] = [[0, -0.5], [-0.5, 0], [0, 0.5], [0.5, 0]][d];
+        // directions 0 up, 1 right, 2 down, 3 left; rotating the group turns them along
+        const d = (direction + rotation) % 4;
+        const [dx, dy] = [[0, -0.5], [0.5, 0], [0, 0.5], [-0.5, 0]][d];
         const [w, hh] = bodySize(piece, p.top);
         const lx = x + dx * w * zoom;
         const ly = y + dy * hh * zoom;
@@ -556,8 +571,8 @@ function renderGroup(group, groupIndex, zoom, showNumbers, showLinks) {
 function rotatePlacement(p, times) {
   let { x, y, top } = p;
   for (let i = 0; i < times; i++) {
-    // same as jigsawlutioner's Group::rotate (clockwise)
-    top = (top + 1) % 4;
+    // a quarter turn clockwise: up becomes right; the side that faced left now faces up
+    top = (top + 3) % 4;
     [x, y] = [-y, x];
   }
   return { ...p, x, y, top };

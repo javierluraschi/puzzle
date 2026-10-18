@@ -3,37 +3,21 @@
 // Per photo:
 //   1. find the card (its frame gives the perspective-correcting homography and the scale)
 //   2. coarse piece mask on the card interior with a shadow-free color distance
-//      (optionally MobileSAM when the piece barely differs from the card)
 //   3. sub-pixel refinement at the photo's native resolution in a crop around the piece
 //   4. contour -> card millimetres
-// Then the photos are combined: frames of one placement are averaged; if the piece was turned by
-// 180° for a second placement, the two placements are intersected – a shadow or a lit cardboard
-// rim only ever adds area on one side, so whatever is not in both is not the piece.
+// Then the frames are aligned and averaged (blurred frames are dropped first).
 import {
   detectCard, keepInside, applyHomography, segmentOnCard, refineOnCard, pickCenterComponent,
   isoContours, orient, resampleClosed, polygonArea, polygonCentroid, normalizeContour, alignTo,
-  addCoverage, contourDeviation, smoothClosed, resizeField, warpField,
+  addCoverage, contourDeviation, smoothClosed, warpField,
 } from './vision.js';
 
 const COARSE_SIZE = 1024; // long side for finding the card
 const INTERIOR_SIZE = 900; // long side of the card interior for the coarse mask
 const FINE_MAX = 1400; // cap for the native-resolution crop around the piece
-const MODEL_CACHE = 'jigsaw-models-v1';
-const MODELS = {
-  encoder: '/models/mobile_sam_image_encoder.onnx',
-  decoder: '/models/sam_mask_decoder_multi.onnx',
-};
-
-let ort = null;
-let sam = null;
-let samLoading = null;
-
 self.onmessage = async ({ data }) => {
   try {
-    if (data.type === 'load-sam') {
-      await loadSam();
-      self.postMessage({ id: data.id, result: { device: sam.device } });
-    } else if (data.type === 'refine') {
+    if (data.type === 'refine') {
       self.postMessage({ id: data.id, result: await refine(data) });
     } else if (data.type === 'card') {
       self.postMessage({ id: data.id, result: findCard(data.bitmap) });
@@ -79,7 +63,7 @@ function bbox(points) {
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
-async function photoContour(bitmap, { useSam }) {
+async function photoContour(bitmap) {
   // 1. the card, found on a downscaled copy; mm <-> photo pixels through its homography
   const cs = COARSE_SIZE / Math.max(bitmap.width, bitmap.height);
   const coarse = draw(bitmap, cs, [0, 0, bitmap.width, bitmap.height]);
@@ -93,16 +77,9 @@ async function photoContour(bitmap, { useSam }) {
   const is = Math.min(1, INTERIOR_SIZE / Math.max(iRect[2], iRect[3]));
   const interior = draw(bitmap, is, iRect);
   keepInside(interior.pixels, interior.w, interior.h, interiorPhoto.map(([x, y]) => [(x - iRect[0]) * is, (y - iRect[1]) * is]));
-  let { mask, contrast } = segmentOnCard(interior.pixels, interior.w, interior.h);
-  let piece = pickCenterComponent(mask, interior.w, interior.h);
-  let engine = 'shadow-free';
-  if ((!piece || piece.touchesBorder || contrast < 0.5) && useSam && (await loadSam().catch(() => null))) {
-    const prob = await samMask(interior.pixels, interior.w, interior.h, [interior.w / 2, interior.h / 2]);
-    mask = Uint8Array.from(prob, (v) => (v > 0.5 ? 1 : 0));
-    piece = pickCenterComponent(mask, interior.w, interior.h);
-    engine = 'mobilesam';
-  }
-  if (!piece) throw new Error('No piece found on the card.');
+  const { mask } = segmentOnCard(interior.pixels, interior.w, interior.h);
+  const piece = pickCenterComponent(mask, interior.w, interior.h);
+  if (!piece) throw new Error('No piece found on the card – try the other card color for this piece.');
   if (piece.touchesBorder) throw new Error('The piece touches the card frame – place it in the middle.');
 
   // 3. native-resolution crop around the piece, the coarse mask as prior
@@ -136,7 +113,6 @@ async function photoContour(bitmap, { useSam }) {
     sharpness: refined.sharpness,
     contrast: refined.contrast,
     noise: refined.noise,
-    engine,
   };
 }
 
@@ -179,14 +155,14 @@ function combine(outlines, mode, angles) {
   return { contour, deviations: aligned.map((poly) => contourDeviation(poly, unit)) };
 }
 
-async function refine({ frames, useSam = false, options = {} }) {
+async function refine({ frames, options = {} }) {
   const started = performance.now();
   const results = [];
   const errors = [];
   for (let f = 0; f < frames.length; f++) {
     progress('refine', f / frames.length);
     try {
-      results.push({ ...(await photoContour(frames[f].bitmap, { useSam })), placement: frames[f].placement || 0, frame: f });
+      results.push({ ...(await photoContour(frames[f].bitmap)), placement: 0, frame: f });
     } catch (error) {
       errors.push(error.message);
     } finally {
@@ -205,18 +181,7 @@ async function refine({ frames, useSam = false, options = {} }) {
     const fused = sharp.length > 1 ? combine(sharp.map((r) => r.mm), 'mean', [-0.1, 0, 0.1]) : { contour: sharp[0].mm, deviations: [0] };
     placements.push({ contour: fused.contour, frames: sharp, deviation: mean(fused.deviations.slice(1)) });
   }
-  if (options.placementsRequired && placements.length < options.placementsRequired) {
-    throw new Error('The card was not found in the turned photo – try again.');
-  }
-
-  // turned placements: intersect (alignment tries all rotations; the user was asked for 180°)
   let final = placements[0].contour;
-  let turnDifference = null;
-  if (placements.length > 1) {
-    const both = combine(placements.map((p) => p.contour), 'min', Array.from({ length: 12 }, (_, i) => (i * Math.PI) / 6));
-    final = both.contour;
-    turnDifference = both.deviations[1];
-  }
 
   // a touch of smoothing along the outline (0.08 mm) removes pixel jitter but keeps the corners
   final = resampleClosed(final, 1600);
@@ -234,16 +199,14 @@ async function refine({ frames, useSam = false, options = {} }) {
     quality: {
       frames: frames.length,
       used: placements.reduce((s, p) => s + p.frames.length, 0),
-      placements: placements.length,
-      // disagreement between frames / between the turned placements, % of the piece size
+      // disagreement between the frames, % of the piece size
       deviation: round(mean(placements.map((p) => p.deviation)) * 100, 3),
-      turnDifference: turnDifference === null ? null : round(turnDifference * 100, 3),
       contrast: round(mean(results.map((r) => r.contrast)), 1),
       sharpness: round(mean(results.map((r) => r.sharpness)), 1),
       pixelsPerMm: round(mean(results.map((r) => r.pxPerMm)), 1),
       pixelsPerPiece: round(sizeMm * mean(results.map((r) => r.pxPerMm))),
       photo: results[0].photoSize,
-      engine: results.some((r) => r.engine === 'mobilesam') ? 'mobilesam' : 'shadow-free',
+      engine: 'shadow-free',
       card: true,
       ms: Math.round(performance.now() - started),
     },
@@ -287,109 +250,4 @@ async function warmup() {
   } catch {
     // only for warming up
   }
-}
-
-// --- MobileSAM (optional, for pieces that barely differ from the card) ------------------------------
-
-async function loadSam() {
-  if (sam) return sam;
-  if (!samLoading) {
-    samLoading = (async () => {
-      ort = await import('/vendor/ort/ort.webgpu.min.mjs');
-      ort.env.wasm.wasmPaths = '/vendor/ort/';
-      ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
-      const encoderBytes = await fetchCached(MODELS.encoder, (p) => progress('download', p * 0.63));
-      const decoderBytes = await fetchCached(MODELS.decoder, (p) => progress('download', 0.63 + p * 0.37));
-      progress('download', 1);
-      for (const device of navigator.gpu ? ['webgpu', 'wasm'] : ['wasm']) {
-        try {
-          const encoder = await ort.InferenceSession.create(encoderBytes, { executionProviders: [device], graphOptimizationLevel: 'all' });
-          const decoder = await ort.InferenceSession.create(decoderBytes, { executionProviders: ['wasm'] });
-          sam = { encoder, decoder, device };
-          return sam;
-        } catch (error) {
-          console.warn(`MobileSAM on ${device} failed`, error);
-        }
-      }
-      throw new Error('MobileSAM could not be started on this device');
-    })();
-    samLoading.catch(() => { samLoading = null; });
-  }
-  return samLoading;
-}
-
-async function fetchCached(url, onProgress) {
-  const cache = await caches.open(MODEL_CACHE).catch(() => null);
-  const cached = cache && (await cache.match(url));
-  if (cached) {
-    onProgress(1);
-    return new Uint8Array(await cached.arrayBuffer());
-  }
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Model download failed (${response.status})`);
-  const total = Number(response.headers.get('content-length')) || 0;
-  const reader = response.body.getReader();
-  const chunks = [];
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.length;
-    if (total) onProgress(received / total);
-  }
-  const bytes = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  if (cache) await cache.put(url, new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } })).catch(() => {});
-  return bytes;
-}
-
-/** MobileSAM probability mask for the piece at `point` (most confident plausible candidate). */
-async function samMask(pixels, w, h, point) {
-  // the export resizes/normalizes inside the graph but expects the long side to be 1024
-  const s = 1024 / Math.max(w, h);
-  const sw = Math.round(w * s);
-  const sh = Math.round(h * s);
-  const src = new OffscreenCanvas(w, h);
-  src.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels), w, h), 0, 0);
-  const canvas = new OffscreenCanvas(sw, sh);
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(src, 0, 0, sw, sh);
-  const scaled = ctx.getImageData(0, 0, sw, sh).data;
-  const input = new Float32Array(sw * sh * 3);
-  for (let i = 0; i < sw * sh; i++) {
-    input[i * 3] = scaled[i * 4];
-    input[i * 3 + 1] = scaled[i * 4 + 1];
-    input[i * 3 + 2] = scaled[i * 4 + 2];
-  }
-  const { image_embeddings: embeddings } = await sam.encoder.run({ input_image: new ort.Tensor('float32', input, [sh, sw, 3]) });
-  const out = await sam.decoder.run({
-    image_embeddings: embeddings,
-    point_coords: new ort.Tensor('float32', Float32Array.from([point[0] * s, point[1] * s, 0, 0]), [1, 2, 2]),
-    point_labels: new ort.Tensor('float32', Float32Array.from([1, -1]), [1, 2]),
-    mask_input: new ort.Tensor('float32', new Float32Array(256 * 256), [1, 1, 256, 256]),
-    has_mask_input: new ort.Tensor('float32', Float32Array.from([0]), [1]),
-    orig_im_size: new ort.Tensor('float32', Float32Array.from([sh, sw]), [2]),
-  });
-  const [, count] = out.masks.dims;
-  const scores = out.iou_predictions.data;
-  const logits = out.masks.data;
-  let pick = 0;
-  let best = 0.6;
-  for (let m = 1; m < count; m++) {
-    let area = 0;
-    for (let i = m * sw * sh; i < (m + 1) * sw * sh; i++) if (logits[i] > 0) area++;
-    const fraction = area / (sw * sh);
-    if (fraction > 0.01 && fraction < 0.6 && scores[m] > best) {
-      best = scores[m];
-      pick = m;
-    }
-  }
-  const prob = new Float32Array(sw * sh);
-  for (let i = 0; i < prob.length; i++) prob[i] = 1 / (1 + Math.exp(-logits[pick * sw * sh + i]));
-  return resizeField(prob, sw, sh, w, h);
 }

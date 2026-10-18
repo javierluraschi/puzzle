@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source .env
 tar --exclude='.env*' --exclude='.git' --exclude='./tools' --exclude='./data' --exclude='./vendor' \
-    --exclude='context.tar.gz' --exclude='prompt.md' --exclude='./public/_t' --exclude='./public/_tb' --exclude='./public/vendor' --exclude='./public/models' -czf context.tar.gz .
+    --exclude='context.tar.gz' --exclude='prompt.md' --exclude='./public/_t' --exclude='./public/_tb' --exclude='./public/vendor' --exclude='./public/models' --exclude='./tests' --exclude='./node_modules' -czf context.tar.gz .
 build=$(curl -sf -X POST https://cloudish.ai/api/v1/projects -H "Authorization: Bearer $CLOUDISH_API_KEY" \
   -F name=jigsaw -F port=8080 -F context=@context.tar.gz \
   -F volumeEnabled=true -F volumeSizeGb=1 -F volumeMountPath=/data "$@" \

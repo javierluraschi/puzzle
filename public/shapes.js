@@ -1,8 +1,9 @@
 // SVG drawings of scanned pieces from their outlines (no images are stored).
 //
-// A piece summary from the server carries `outline` (polygon in the coordinates of the silhouette
-// jigsawlutioner analyzed), `corners`, `center`, `sideLengths`, `directions` and `rotations[top]`
-// (degrees that bring side `top` to the top, as in jigsawlutioner-cli's solution view).
+// A piece summary from the server carries, in millimetres: `outline`, `corners`, `center` (middle of
+// the corners), `sideLengths`, plus `directions` (flat / out = tab / in = blank per side) and
+// `rotations[top]` (degrees that bring side `top` up). Sides are numbered clockwise, so with side
+// `top` facing up, side top+1 faces right, top+2 down and top+3 left. Zoom is in pixels per mm.
 
 const NS = 'http://www.w3.org/2000/svg';
 export const SIDE_COLORS = { flat: '#8a93a6', out: '#ffb020', in: '#4fa3ff', unknown: '#c06cff' };
@@ -15,16 +16,21 @@ export function svgEl(tag, attrs = {}, ...children) {
 }
 
 export function pathData(points) {
-  return 'M' + points.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join('L') + 'Z';
+  return 'M' + points.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join('L') + 'Z';
 }
 
-/** Width/height of the piece body when side `top` faces up (average of opposite sides). */
+/** Width/height (mm) of the piece body when side `top` faces up (average of opposite sides). */
 export function bodySize(piece, top) {
   const L = piece.sideLengths;
   return [(L[top % 4] + L[(top + 2) % 4]) / 2, (L[(top + 1) % 4] + L[(top + 3) % 4]) / 2];
 }
 
-/** SVG transform that draws the piece's outline with side `top` up, centered at (x, y). */
+/** The side index that faces direction `dir` (0 up, 1 right, 2 down, 3 left) when `top` is up. */
+export const sideFacing = (top, dir) => (top + dir) % 4;
+/** The `top` that makes side `side` face direction `dir`. */
+export const topFor = (side, dir) => (side - dir + 8) % 4;
+
+/** SVG transform that draws the piece's outline with side `top` up, centered at (x, y) pixels. */
 export function placement(piece, top, zoom, x, y) {
   const [cx, cy] = piece.center;
   return `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${piece.rotations[top % 4]}) scale(${zoom}) translate(${-cx} ${-cy})`;
@@ -64,9 +70,10 @@ export function sidePolylines(piece) {
 
 /**
  * A standalone <svg> of one piece with side `top` up, sized to its body (+ margin for tabs).
- * Options: highlight (side index drawn as a thick accent), sides (color sides by type), label.
+ * Options: highlight (side drawn as a thick accent), sides (color sides by type), corners (dots),
+ * label.
  */
-export function pieceSvg(piece, { top = 0, zoom = 0.2, highlight = null, sides = false, label = null, className = '' } = {}) {
+export function pieceSvg(piece, { top = 0, zoom = 3, highlight = null, sides = false, corners = false, label = null, className = '' } = {}) {
   if (!piece.ok || !piece.outline) return failedSvg(piece, zoom, className);
   const [bw, bh] = bodySize(piece, top);
   const margin = 0.36;
@@ -80,10 +87,13 @@ export function pieceSvg(piece, { top = 0, zoom = 0.2, highlight = null, sides =
       if (!sides && k !== highlight) return;
       const color = k === highlight ? '#ffd400' : SIDE_COLORS[piece.directions[k]] || SIDE_COLORS.unknown;
       g.append(svgEl('polyline', {
-        points: pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' '),
+        points: pts.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(' '),
         fill: 'none', stroke: color, 'stroke-width': k === highlight ? 5 : 3.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke',
       }));
     });
+  }
+  if (corners) {
+    for (const [x, y] of piece.corners) g.append(svgEl('circle', { cx: x.toFixed(2), cy: y.toFixed(2), r: (4 / zoom).toFixed(3), class: 'corner-dot' }));
   }
   svg.append(g);
   if (label !== null) {
@@ -93,7 +103,7 @@ export function pieceSvg(piece, { top = 0, zoom = 0.2, highlight = null, sides =
 }
 
 function failedSvg(piece, zoom, className) {
-  const s = 330 * zoom * 1.4;
+  const s = 22 * zoom * 1.4;
   const svg = svgEl('svg', { class: 'piece-svg failed ' + className, width: s.toFixed(1), height: s.toFixed(1), viewBox: `0 0 ${s.toFixed(1)} ${s.toFixed(1)}` });
   if (piece.outline) {
     const xs = piece.outline.map((p) => p[0]);
@@ -107,8 +117,8 @@ function failedSvg(piece, zoom, className) {
 
 /** Piece A with side `sideA` facing right, joined to piece B with side `sideB` facing left. */
 export function pairSvg(a, sideA, b, sideB, zoom) {
-  const topA = (sideA + 1) % 4;
-  const topB = (sideB + 3) % 4;
+  const topA = topFor(sideA, 1);
+  const topB = topFor(sideB, 3);
   const [aw, ah] = bodySize(a, topA);
   const [bw, bh] = bodySize(b, topB);
   const margin = 0.36 * Math.max(aw, bw, ah, bh) * zoom;

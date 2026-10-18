@@ -30,7 +30,8 @@ def main():
     bg = frames.table(rng, "slate")
     card = os.environ.get("CARD")  # dark|light: pieces lie on the scan card
     if card:
-        px_per_mm = frames.OUT[1] * 0.80 / (frames.CARD_OUTER + 2 * frames.CARD_MARGIN)
+        # fraction of the view height taken by the printed card incl. its white margin
+        px_per_mm = frames.OUT[1] * float(os.environ.get("CARD_VIEW", "0.80")) / (frames.CARD_OUTER + 2 * frames.CARD_MARGIN)
         bg = frames.draw_card(bg, (52, 56, 64) if card == "dark" else (238, 238, 232), px_per_mm, 4, (frames.FRAME[0] / 2, frames.FRAME[1] / 2))
     t = 0
     with open(out, "wb") as f:

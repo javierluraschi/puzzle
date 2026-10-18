@@ -1,0 +1,11 @@
+{
+  "name": "jigsaw-scanner",
+  "private": true,
+  "type": "module",
+  "description": "Scan jigsaw pieces with a phone, catalog their exact outlines, match and assemble them",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server/index.js"
+  }
+}

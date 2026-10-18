@@ -5,3 +5,4 @@ data
 tools
 context.tar.gz
 *.md
+node_modules

@@ -12,7 +12,15 @@ const CHECK_SIZE = 320; // long side of the frames checked for the card
 const STEADY_CHECKS = 3; // consecutive stable card detections before capturing
 const VIDEO_FRAMES = 3; // frames per placement when grabbing from the video stream
 const PHOTO_SHOTS = 2; // photos per placement with ImageCapture.takePhoto()
-const MAX_TILT_DEG = 8;
+const MAX_TILT_DEG = 3; // flatter photos give truer outlines
+const CARD_FILL = 0.72; // the card's side as a fraction of the shorter side of the view
+const HINT_AFTER_MS = 5000;
+const LEVEL_PX_PER_DEG = 2.6; // bubble travel in the level indicator
+
+const STRONG_HINTS = {
+  size: 'Move the phone closer until the card fills the dashed square',
+  tilt: 'Hold the phone flatter – the dot must stay inside the small circle',
+};
 
 class WorkerClient {
   constructor(url, onEvent = () => {}) {
@@ -62,8 +70,8 @@ export class Scanner {
     this.renderResult = renderResult;
     this.state = 'idle';
     this.tilt = null;
-    this.turnMode = localStorage.getItem('turn-mode') === 'on';
-    this.flash = false;
+    // the light reduces shadows a lot: always on where the browser can switch it
+    this.flash = true;
     this.build();
   }
 
@@ -88,8 +96,6 @@ export class Scanner {
           <button class="scanner-shutter" title="Capture now">
             <svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34" class="ring-bg"/><circle cx="40" cy="40" r="34" class="ring"/></svg>
           </button>
-          <button class="scanner-torch" hidden title="Light (fewer shadows)">🔦</button>
-          <button class="scanner-turn" title="Two captures with the piece turned 180° in between: removes any remaining shadow"></button>
         </div>
         <div class="scanner-result" hidden></div>
       </div>`;
@@ -107,10 +113,6 @@ export class Scanner {
     this.countEl = $('.scanner-count');
     $('.scanner-close').addEventListener('click', () => this.close());
     $('.scanner-shutter').addEventListener('click', () => this.onShutter());
-    this.torchButton = $('.scanner-torch');
-    this.torchButton.addEventListener('click', () => this.toggleTorch());
-    this.turnButton = $('.scanner-turn');
-    this.turnButton.addEventListener('click', () => this.toggleTurn());
     this.labelButton.addEventListener('click', () => this.editLabel());
     $('.scanner-photo input').addEventListener('change', (event) => {
       const file = event.target.files[0];
@@ -118,7 +120,6 @@ export class Scanner {
       if (file) this.processPhotoFile(file);
     });
     this.updateLabel();
-    this.updateTurnButton();
   }
 
   async start() {
@@ -152,13 +153,16 @@ export class Scanner {
     await new Promise((resolve) => (this.video.videoWidth ? resolve() : this.video.addEventListener('loadedmetadata', resolve, { once: true })));
     this.track = this.stream.getVideoTracks()[0];
     const caps = this.track.getCapabilities?.() || {};
-    this.torchButton.hidden = !caps.torch;
-    if (caps.torch && this.flash) this.track.applyConstraints({ advanced: [{ torch: true }] }).catch(() => {});
+    this.hasLight = Boolean(caps.torch);
+    if (caps.torch) this.track.applyConstraints({ advanced: [{ torch: true }] }).catch(() => {});
+    // a little optical/digital zoom lets the phone stay farther away (and in focus) while the card fills the view
+    if (caps.zoom && caps.zoom.max >= 1.5 && caps.zoom.min <= 1.5) this.track.applyConstraints({ advanced: [{ zoom: 1.5 }] }).catch(() => {});
     if (caps.focusMode?.includes('continuous')) this.track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
     this.imageCapture = typeof ImageCapture !== 'undefined' ? new ImageCapture(this.track) : null;
     this.wakeLock = await navigator.wakeLock?.request('screen').catch(() => null);
     this.state = 'aiming';
-    this.guide('Point at the scan card', '');
+    this.aimingSince = performance.now();
+    this.guide('Point at the scan card', this.hasLight ? '' : 'Tip: 🖼 takes the photo with your camera app – turn its flash on');
     this.checkLoop();
   }
 
@@ -203,32 +207,12 @@ export class Scanner {
       const tilt = (Math.acos(Math.min(1, Math.abs(g.z) / norm)) * 180) / Math.PI;
       this.tilt = this.tilt === null ? tilt : this.tilt * 0.7 + tilt * 0.3;
       this.levelEl.hidden = false;
-      const k = Math.min(1, this.tilt / 20) * 34;
+      const k = Math.min(34, this.tilt * LEVEL_PX_PER_DEG);
       const angle = Math.atan2(g.y, -g.x);
       this.bubble.style.transform = `translate(${Math.cos(angle) * k}px, ${Math.sin(angle) * k}px)`;
       this.levelEl.classList.toggle('ok', this.tilt <= MAX_TILT_DEG);
     };
     window.addEventListener('devicemotion', this.motionHandler);
-  }
-
-  async toggleTorch() {
-    this.flash = !this.flash;
-    await this.track?.applyConstraints({ advanced: [{ torch: this.flash }] }).catch(() => {});
-    this.torchButton.classList.toggle('active', this.flash);
-  }
-
-  toggleTurn() {
-    this.turnMode = !this.turnMode;
-    localStorage.setItem('turn-mode', this.turnMode ? 'on' : 'off');
-    this.updateTurnButton();
-    this.guideSub.textContent = this.turnMode
-      ? 'Turn mode: after the first capture you turn the piece around, a second capture removes shadows completely'
-      : 'Single capture per piece';
-  }
-
-  updateTurnButton() {
-    this.turnButton.textContent = this.turnMode ? '↻ 2×' : '↻ 1×';
-    this.turnButton.classList.toggle('active', this.turnMode);
   }
 
   onRefineEvent(event) {
@@ -262,7 +246,7 @@ export class Scanner {
     const gctx = grab.getContext('2d');
     while (this.running && this.stream) {
       await new Promise((r) => setTimeout(r, CHECK_INTERVAL_MS));
-      if (!this.stream || !this.video.videoWidth || !['aiming', 'turning'].includes(this.state)) continue;
+      if (!this.stream || !this.video.videoWidth || this.state !== 'aiming') continue;
       const vw = this.video.videoWidth;
       const vh = this.video.videoHeight;
       const s = CHECK_SIZE / Math.max(vw, vh);
@@ -283,16 +267,15 @@ export class Scanner {
   }
 
   onCardCheck(corners) {
-    this.drawCard(corners);
-    if (!['aiming', 'turning'].includes(this.state)) return;
     const a = this.assess(corners);
+    this.drawCard(corners, a.reason === 'size');
+    if (this.state !== 'aiming') return;
     this.lastCorners = corners;
-    if (this.state === 'turning') {
-      // waits for the user to turn the piece and tap the shutter
-      this.guide('Turn the piece around (180°)', a.ok ? 'then tap ● – keep the card where it is' : a.message);
-      return;
-    }
-    this.guide(a.message, a.sub || '');
+    // still not there after a few seconds: say what is missing more clearly
+    const late = performance.now() - this.aimingSince > HINT_AFTER_MS;
+    const strong = late && (a.reason === 'size' || a.reason === 'tilt') ? STRONG_HINTS[a.reason] : '';
+    this.guide(a.message, strong || a.sub || '');
+    this.guideSub.classList.toggle('strong', Boolean(strong));
     this.stableChecks = a.ok ? this.stableChecks + 1 : 0;
     this.setRing(Math.min(1, this.stableChecks / STEADY_CHECKS) * 0.25);
     if (this.stableChecks >= STEADY_CHECKS) this.capture();
@@ -309,23 +292,23 @@ export class Scanner {
     const vw = this.video.videoWidth;
     const vh = this.video.videoHeight;
     const side = corners.reduce((s, p, i) => s + Math.hypot(p[0] - corners[(i + 1) % 4][0], p[1] - corners[(i + 1) % 4][1]), 0) / 4;
-    if (side < Math.min(vw, vh) * 0.55) return { ok: false, message: 'Move closer – let the card fill the view' };
+    if (side < Math.min(vw, vh) * CARD_FILL) return { ok: false, reason: 'size', message: 'Move closer – let the card fill the view' };
     const cx = corners.reduce((s, p) => s + p[0], 0) / 4;
     const cy = corners.reduce((s, p) => s + p[1], 0) / 4;
     if (Math.hypot(cx - vw / 2, cy - vh / 2) / Math.min(vw, vh) > 0.15) return { ok: false, message: 'Center the card' };
-    if (this.tilt !== null && this.tilt > MAX_TILT_DEG) return { ok: false, message: 'Hold the phone flat', sub: `tilted ${Math.round(this.tilt)}°` };
+    if (this.tilt !== null && this.tilt > MAX_TILT_DEG) return { ok: false, reason: 'tilt', message: 'Hold the phone flatter', sub: `tilted ${this.tilt.toFixed(1)}° – keep the dot in the small circle` };
     if (!previous) return { ok: false, message: 'Hold steady' };
     // corners can come back in a different order: compare each with the nearest previous one;
     // at the small check resolution a corner jitters by ~0.6% of the card side
     const moved = Math.max(...corners.map((p) => Math.min(...previous.map((q) => Math.hypot(p[0] - q[0], p[1] - q[1]))))) / side;
     if (moved > 0.025) return { ok: false, message: 'Hold steady' };
-    return { ok: true, message: 'Hold steady…', sub: this.turnMode ? 'capture 1 of 2' : '' };
+    return { ok: true, message: 'Hold steady…', sub: '' };
   }
 
   // --- capture ----------------------------------------------------------------------------------
 
   onShutter() {
-    if (this.state === 'aiming' || this.state === 'turning') this.capture();
+    if (this.state === 'aiming') this.capture();
   }
 
   /** Full-resolution frames: native photos where the browser can take them, else video frames. */
@@ -334,7 +317,7 @@ export class Scanner {
     if (this.imageCapture) {
       try {
         for (let i = 0; i < PHOTO_SHOTS; i++) {
-          const blob = await this.imageCapture.takePhoto(this.flash ? { fillLightMode: 'flash' } : {});
+          const blob = await this.imageCapture.takePhoto(await this.photoSettings());
           frames.push(await createImageBitmap(blob, { imageOrientation: 'from-image' }));
         }
         return frames;
@@ -351,23 +334,24 @@ export class Scanner {
     return frames;
   }
 
+  /** Flash for native photos when the camera offers it. */
+  async photoSettings() {
+    if (this.photoFlash === undefined) {
+      const caps = await this.imageCapture.getPhotoCapabilities().catch(() => null);
+      this.photoFlash = Boolean(caps?.fillLightMode?.includes('flash'));
+    }
+    return this.photoFlash ? { fillLightMode: 'flash' } : {};
+  }
+
   async capture() {
-    if (!['aiming', 'turning'].includes(this.state)) return;
-    const placement = this.placements.length;
+    if (this.state !== 'aiming') return;
     this.state = 'capturing';
-    this.guide('Hold still…', this.turnMode ? `capture ${placement + 1} of 2` : '');
+    this.guide('Hold still…', '');
     this.setRing(0.25);
     const frames = await this.grabFrames();
     navigator.vibrate?.(20);
     const preview = await halfSize(frames[0]);
-    this.placements.push({ frames, preview });
-
-    if (this.turnMode && placement === 0) {
-      this.state = 'turning';
-      this.setRing(0.5);
-      this.guide('Turn the piece around (180°)', 'then tap ● – keep the card where it is');
-      return;
-    }
+    this.placements = [{ frames, preview }];
     await this.process(this.placements);
   }
 
@@ -391,10 +375,10 @@ export class Scanner {
     this.stopCamera();
     this.guide('Tracing the edges…', '');
     this.setRing(0.3);
-    const frames = placements.flatMap((p, placement) => p.frames.map((bitmap) => ({ bitmap, placement })));
+    const frames = placements.flatMap((p) => p.frames.map((bitmap) => ({ bitmap })));
     let result;
     try {
-      result = await this.refiner.call({ type: 'refine', frames, options: { placementsRequired: placements.length } }, frames.map((f) => f.bitmap));
+      result = await this.refiner.call({ type: 'refine', frames }, frames.map((f) => f.bitmap));
     } catch (error) {
       placements.forEach((p) => p.preview.close());
       this.showError(error.message);
@@ -447,8 +431,6 @@ export class Scanner {
     const q = result.quality;
     const warnings = [];
     if (q.pixelsPerPiece < 250) warnings.push(`The piece was only ${Math.round(q.pixelsPerPiece)} px across – move closer or use 🖼 (camera app) for sharper edges.`);
-    if (q.turnDifference !== null && q.turnDifference > 1.5) warnings.push('The two captures differed a lot – was the piece turned on the card without moving the card?');
-    if (q.engine === 'mobilesam') warnings.push('Low contrast with the card: AI segmentation was used. The other card color may work better for this piece.');
 
     panel.append(
       this.renderResult(summary, still),
@@ -529,7 +511,7 @@ export class Scanner {
     ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
   }
 
-  drawCard(corners) {
+  drawCard(corners, tooSmall = false) {
     const { s, ox, oy, rect } = this.videoToScreen();
     const dpr = window.devicePixelRatio || 1;
     if (this.overlay.width !== Math.round(rect.width * dpr)) {
@@ -539,6 +521,17 @@ export class Scanner {
     const ctx = this.overlay.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, rect.width, rect.height);
+    if (!corners || tooSmall) {
+      // where the card should be: centered, filling the view
+      const vw = this.video.videoWidth * s;
+      const vh = this.video.videoHeight * s;
+      const side = Math.min(vw, vh) * (CARD_FILL + 0.06);
+      ctx.setLineDash([10, 8]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(ox + (vw - side) / 2, oy + (vh - side) / 2, side, side);
+      ctx.setLineDash([]);
+    }
     if (!corners) return;
     ctx.beginPath();
     corners.forEach(([x, y], i) => (i ? ctx.lineTo(x * s + ox, y * s + oy) : ctx.moveTo(x * s + ox, y * s + oy)));

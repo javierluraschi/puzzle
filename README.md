@@ -2,11 +2,15 @@
 
 Live at **https://jigsawsolver.on.do.cloudish.ai/**
 
-Scan jigsaw pieces one at a time with a phone camera to build a catalog of pieces. Each
-piece's exact outline is traced on the device, and only that 2D contour is stored. The server
-runs [byWulf/jigsawlutioner](https://github.com/byWulf/jigsawlutioner) on the contours to find
-each piece's four sides (tab, blank or flat edge), show the best candidates for every side, and
-assemble the catalog into groups.
+Scan jigsaw pieces one at a time with a phone camera on a printed scan card. The app traces each
+piece's exact outline on the device and stores only that 2D contour plus a label. The Node server
+finds every piece's four sides (tab, blank or flat edge), matches sides geometrically, and
+assembles the catalog into groups.
+
+The first version used [byWulf/jigsawlutioner](https://github.com/byWulf/jigsawlutioner) (PHP)
+for analysis and solving. With the accurate contours from the scanner, a direct geometric
+comparison of sides works better. The server is now plain Node with no dependencies.
+jigsawlutioner's results served as the reference to validate the new corner finder and solver.
 
 ## Using it
 
@@ -19,54 +23,64 @@ assemble the catalog into groups.
 3. **Review**, write the number on the back of the piece, then tap *Next piece*.
 4. **Match / solve.** Open a piece to see what fits each side, or solve the whole catalog.
 
-Optional: **🔦** turns on a continuous light where the browser supports it (fewer shadows). **↻ 2×**
-takes two captures with the piece turned 180° in between and keeps only what is in both, which
-cancels any remaining shadow.
+The light (torch / flash) is switched on automatically where the browser allows it. The scanner
+waits for the phone to be flat (within 3°) and for the card to fill the view, and explains what is
+missing if that takes longer than 5 seconds.
 
 ## How the scanner works (all on the device)
 
 | Stage | Where | What |
 |---|---|---|
 | Live view | `public/scan/live-worker.js` | Only finds the card, ~3×/s on a 320 px frame. The camera runs at 15 fps and a motion-sensor level shows tilt. The piece is not segmented live: continuous segmentation overheated phones. |
-| Capture | `public/scan/scanner.js` | Native photos via `ImageCapture.takePhoto()` where available, otherwise the highest-resolution video frames. The camera is switched off while processing and reviewing. |
+| Capture | `public/scan/scanner.js` | Native photos via `ImageCapture.takePhoto()` (with flash) where available, otherwise the highest-resolution video frames. The camera is switched off while processing and reviewing. |
 | Card | `vision.detectCard` | Ring found in the downscaled photo; corners refined by line fitting; homography to mm. |
-| Coarse mask | `vision.segmentOnCard` | On the blanked card interior, with a **shadow-free distance**: the pixel is written as I = s·B + r against the local card color B. Shadows (s < 1, r ≈ 0) score zero; the piece differs in color (r) or is brighter. MobileSAM is an optional fallback for low contrast. |
+| Coarse mask | `vision.segmentOnCard` | On the blanked card interior, with a **shadow-free distance**: the pixel is written as I = s·B + r against the local card color B. Shadows (s < 1, r ≈ 0) score zero; the piece differs in color (r) or is brighter. |
 | Edges | `vision.refineOnCard` | At the photo's native resolution around the piece: α = (D(I) − n) / (D(F) − n), using the shadow-free distance D, the nearest piece color F and the card color averaged over the plain card. The 0.5 iso-line is traced with marching squares, then smoothed by 0.08 mm along the outline. |
-| Combine | `refine-worker.js` | Frames of one placement are averaged; turned placements are intersected (a shadow only ever adds area). |
+| Combine | `refine-worker.js` | Frames are aligned and averaged; blurred frames are dropped first. |
 
 On the six test photos (`tests/test1`), the new pipeline excludes the shadow crescents the old
 one included: its outlines were 7–9% too large in sqrt(area). Jitter is about 35% lower, and all
 side types (tab / blank) are detected correctly. On synthetic bursts with ground truth, the
 outline error is about 0.25% of piece size.
 
-## Server
+## Server (Node, no dependencies)
 
 | Part | What it does |
 |---|---|
-| `server/router.php` | JSON API and static files. Sends COOP/COEP headers so the browser can run multi-threaded WASM. |
-| `server/lib.php` | Rebuilds the silhouette jigsawlutioner expects from the contour (1000×1060, drawn at 2× for sub-pixel edges) and runs `PieceAnalyzer`. Scale comes from the card, or from a two-pass normalization to ~305 px sides. Also flags probable duplicates, handles labels, and computes per-side matches (`WeightedMatcher`). |
-| `server/solve.php` | Background solver: `MatchingMapGenerator` + `ByWulfSolver`. |
+| `server/piece.js` | Finds the four corners: sharp convex turns, choosing the four that form the most rectangle-like quad whose sides start and end straight. Splits the outline into sides in their own frame, classifies each side (flat / tab / blank) and samples it for matching. Agrees with jigsawlutioner on all 54 demo pieces (same side types, corners within 0.2 mm). |
+| `server/match.js` | Geometric side matching. Side B is mated onto side A (flipped and reversed, as two real neighbours meet), then a rigid ICP fit is run that also allows a **uniform gap**: photos show the slightly rounded top edge, so true neighbours sit about 0.3 mm apart along the whole edge. The score is the remaining shape mismatch in mm, plus a penalty for a gap far from the puzzle's typical one, which is estimated from mutual-best fits. |
+| `server/solver.js` | Constrained assembly. Links are processed strongest first (mutual-best and clear winners ahead). Two groups merge only if every pair of pieces that ends up side by side fits, no cells collide and no flat edge faces a neighbour. When two groups agree along many good contacts but conflict in a few places, the weaker pieces are evicted and may re-attach later (local backtracking). |
+| `server/store.js` | JSON files per puzzle under `$DATA_DIR/puzzles/<id>/`. Pieces from the PHP version are re-analyzed from their stored contours. |
+| `server/index.js` | HTTP API + static files. Solving runs in a worker thread (`server/solve-worker.js`). |
+
+Results against ground truth (jigsawlutioner's verified solutions of the sample sets):
+
+| Set | Pieces | Biggest group | Neighbour pairs correct (precision) | Found (recall) | Time |
+|---|---|---|---|---|---|
+| cats (demo) | 54 | 54 | 100% | 100% | ~1.5 s |
+| paris | 500 | 489 | 99.8% | 97.1% | ~20 s |
+
+On the six real pieces from `tests/test1`, the measured typical gap is 0.31 mm. The solver
+assembles a 2×2 block and a separate pair, consistent with the test 2 feedback.
 
 ### API
 
 ```
-POST   /api/puzzles                       {name}                         -> catalog
-GET    /api/puzzles/:id                                                  -> pieces, next label, solve status
-POST   /api/puzzles/:id/pieces            {label, contour, sizeMm?, quality?, replace?} -> analyzed piece
+POST   /api/puzzles                       {name}                                 -> catalog
+GET    /api/puzzles/:id                                                          -> pieces, next label, solve status
+POST   /api/puzzles/:id/pieces            {label, contour, sizeMm, quality?, replace?} -> analyzed piece
 PATCH  /api/puzzles/:id/pieces/:n         {label}
 DELETE /api/puzzles/:id/pieces/:n
-GET    /api/puzzles/:id/pieces/:n/matches                                -> best candidates per side
-POST   /api/puzzles/:id/solve                                            -> starts the solver
-GET    /api/puzzles/:id/solution                                         -> status + groups
-GET    /api/puzzles/:id/export                                           -> all labels + contours (JSON)
+GET    /api/puzzles/:id/pieces/:n/matches                                        -> best candidates per side (gap in mm)
+POST   /api/puzzles/:id/solve                                                    -> starts the solver
+GET    /api/puzzles/:id/solution                                                 -> status + groups
+GET    /api/puzzles/:id/export                                                   -> labels + contours (JSON)
 ```
 
 ## Running locally
 
 ```bash
-composer install
-# ONNX Runtime Web + MobileSAM are downloaded by the Dockerfile; for local use fetch them the same way
-php -S 0.0.0.0:8080 -t public server/router.php
+PORT=8080 DATA_DIR=./data node server/index.js
 ```
 
 ## Deploying
@@ -83,8 +97,6 @@ and rolls it out. It needs `CLOUDISH_API_KEY` in `.env`.
 
 ## Credits
 
-[jigsawlutioner](https://github.com/byWulf/jigsawlutioner) by Michael Wolf (MIT) does the piece
-analysis and the solving. [MobileSAM](https://github.com/ChaoningZhang/MobileSAM) (Apache-2.0),
-using the ONNX export by [Acly](https://huggingface.co/Acly/MobileSAM) (MIT), runs on
-[ONNX Runtime Web](https://onnxruntime.ai) (MIT). The demo pieces come from
-[jigsawlutioner-cli](https://github.com/byWulf/jigsawlutioner-cli) (MIT).
+[jigsawlutioner](https://github.com/byWulf/jigsawlutioner) and
+[jigsawlutioner-cli](https://github.com/byWulf/jigsawlutioner-cli) by Michael Wolf (MIT): the
+original analysis/solver, the reference results used for validation, and the demo pieces.

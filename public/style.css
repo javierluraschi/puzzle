@@ -206,8 +206,8 @@ body.scanning { overflow: hidden; }
 .ring-bg { fill: rgba(255, 255, 255, 0.15); stroke: rgba(255, 255, 255, 0.8); stroke-width: 4; }
 .ring { fill: none; stroke: var(--ok); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 213.6; stroke-dashoffset: 213.6; transition: stroke-dashoffset 0.15s linear; }
 .scanner-level { position: absolute; top: calc(env(safe-area-inset-top) + 4rem); right: 1rem; width: 80px; height: 80px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.5); background: rgba(0, 0, 0, 0.3); }
-.scanner-level::after { content: ""; position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px; border-radius: 50%; border: 1px dashed rgba(255, 255, 255, 0.6); }
-.scanner-level .bubble { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px; border-radius: 50%; background: var(--accent); transition: transform 0.1s; }
+.scanner-level::after { content: ""; position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, 0.85); }
+.scanner-level .bubble { position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px; border-radius: 50%; background: var(--accent); transition: transform 0.1s; }
 .scanner-level.ok .bubble { background: var(--ok); }
 .scanner-result { position: absolute; left: 0.6rem; right: 0.6rem; bottom: calc(env(safe-area-inset-bottom) + 0.6rem); max-height: 70%; overflow: auto; background: rgba(29, 32, 39, 0.97); border: 1px solid var(--line); border-radius: 16px; padding: 0.9rem; color: var(--text); z-index: 3; }
 .result-card { display: flex; flex-direction: column; gap: 0.6rem; }
@@ -223,3 +223,5 @@ body.scanning { overflow: hidden; }
 .scanner-photo { display: inline-flex; align-items: center; justify-content: center; min-width: 4.2rem; padding: 0.5rem 0.9rem; border-radius: 10px; background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(255, 255, 255, 0.25); color: #fff; cursor: pointer; font-size: 1.1rem; }
 .scanner-bottom { gap: 1.2rem; }
 .scanner-result h3.error { margin-top: 0; }
+.corner-dot { fill: #ff6a3d; stroke: #fff; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.guide-sub.strong { color: var(--accent); font-weight: 700; font-size: 1.05rem; }
