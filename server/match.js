@@ -8,6 +8,8 @@
 // the whole edge (~0.1-0.3 mm on phone photos, ~0 on flatbed scans). The comparison therefore fits
 // a rigid motion plus such a uniform offset; the score is the remaining shape mismatch (RMS, mm)
 // over the middle of the side, plus a penalty for an offset far from the puzzle's typical one.
+// The ends of the side are checked separately: true neighbours meet corner to corner, so ends that
+// overshoot or bend away from the other side are penalized (see endMismatch).
 
 import { SIDE_SAMPLES } from './piece.js';
 import { compose, invert, fit, sideFrame } from './rigid.js';
@@ -17,6 +19,11 @@ const INNER_FROM = Math.round(SIDE_SAMPLES * TRIM);
 const INNER_TO = Math.round(SIDE_SAMPLES * (1 - TRIM));
 const OFFSET_WEIGHT = Number(globalThis.process?.env?.MATCH_OFFSET_WEIGHT ?? 0.5);
 const MAX_OFFSET = 0.45; // mm
+const env = (name, fallback) => Number(globalThis.process?.env?.[name] ?? fallback);
+const CORNER_WEIGHT = env('MATCH_CORNER_WEIGHT', 0.3);
+const CORNER_TOLERANCE = env('MATCH_CORNER_TOLERANCE', 0.6); // mm
+const TAIL_WEIGHT = env('MATCH_TAIL_WEIGHT', 0.5);
+const TAIL_TOLERANCE = env('MATCH_TAIL_TOLERANCE', 0.2); // mm
 
 export function complementary(a, b) {
   return (a.type === 'out' && b.type === 'in') || (a.type === 'in' && b.type === 'out');
@@ -117,7 +124,25 @@ export function sideFit(a, b) {
     const sin = sb / norm;
     m = m.map(([x, y]) => [cos * (x - mx) - sin * (y - my) + nx, sin * (x - mx) + cos * (y - my) + ny]);
   }
-  return { residual, offset, pose: a.origin ? relativePose(a, b, start, m) : null };
+  return { residual, offset, ends: endMismatch(a, m, offset), pose: a.origin ? relativePose(a, b, start, m) : null };
+}
+
+/**
+ * How well the ends of the fitted B meet A's ends, outside the middle the fit used: `corner` is how
+ * far apart the corners lie along the edge, `tail` the mean distance (mm) of B's end stretches from
+ * A's curve beyond the gap. True neighbours meet corner to corner; the worse end counts.
+ */
+function endMismatch(a, m, offset) {
+  const n = a.points.length - 1;
+  let corner = 0;
+  let tail = 0;
+  for (const [from, to, k] of [[0, INNER_FROM, 0], [INNER_TO, n + 1, n]]) {
+    corner = Math.max(corner, Math.abs(m[k][0] - a.points[k][0]));
+    let d = 0;
+    for (let j = from; j < to; j++) d += Math.abs(nearestOnA(a.points, m[j], j, 6).signed - offset);
+    tail = Math.max(tail, d / (to - from));
+  }
+  return { corner, tail };
 }
 
 /**
@@ -130,9 +155,15 @@ function relativePose(a, b, start, final) {
   return compose(invert(sideFrame(a)), compose(icp, compose(mateMotion, sideFrame(b))));
 }
 
+/** Penalty (mm) for edge ends that do not meet, beyond what noise in corners and outlines explains. */
+export function endPenalty(ends) {
+  if (!ends) return 0;
+  return CORNER_WEIGHT * Math.max(0, ends.corner - CORNER_TOLERANCE) + TAIL_WEIGHT * Math.max(0, ends.tail - TAIL_TOLERANCE);
+}
+
 /** Combined score (mm, lower is better) given the puzzle's typical gap. */
-export function combine({ residual, offset }, typicalOffset) {
-  return residual + OFFSET_WEIGHT * Math.abs(offset - typicalOffset);
+export function combine({ residual, offset, ends }, typicalOffset) {
+  return residual + OFFSET_WEIGHT * Math.abs(offset - typicalOffset) + endPenalty(ends);
 }
 
 /**
