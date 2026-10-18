@@ -4,6 +4,8 @@
 //   pieces/<n>_contour.json   the scanned contour (centered, sqrt(area) = 1000 units)
 //   pieces/<n>_sides.json     side descriptors for matching
 //   status.json, solution.json, matches.json
+// and one file per signed-in user: $DATA_DIR/users/<hash of the account id>.json  { sub, email, name, puzzles: [{ id, added }] }
+// Puzzles saved to an account have meta.owner set and never expire.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -61,7 +63,9 @@ function cleanupOld() {
   const limit = Date.now() - PUZZLE_TTL_DAYS * 86400e3;
   for (const id of fs.readdirSync(root)) {
     try {
-      if (fs.statSync(path.join(root, id)).mtimeMs < limit) fs.rmSync(path.join(root, id), { recursive: true, force: true });
+      if (fs.statSync(path.join(root, id)).mtimeMs >= limit) continue;
+      if (readJson(path.join(root, id, 'meta.json'))?.owner) continue; // saved to an account
+      fs.rmSync(path.join(root, id), { recursive: true, force: true });
     } catch {
       // ignore
     }
@@ -194,3 +198,75 @@ export function nextLabel(all) {
 }
 
 export const file = (id, name) => path.join(puzzleDir(id), name);
+
+// --- accounts ---------------------------------------------------------------------------------
+
+const userKey = (sub) => crypto.createHash('sha256').update(String(sub)).digest('hex').slice(0, 32);
+
+function userFile(sub) {
+  const dir = path.join(dataDir(), 'users');
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `${userKey(sub)}.json`);
+}
+
+/** Records the account's latest name/email; returns its stored record. */
+export function rememberUser({ sub, email, name }) {
+  return withLock(`user:${userKey(sub)}`, () => {
+    const record = readJson(userFile(sub), { sub, puzzles: [] });
+    Object.assign(record, { email, name, seen: Math.floor(Date.now() / 1000) });
+    writeJson(userFile(sub), record);
+    return record;
+  });
+}
+
+/**
+ * Adds puzzles to an account (ids that do not exist are reported, not added). A puzzle without an
+ * owner becomes owned by this account, which keeps it from expiring.
+ */
+export function addUserPuzzles(user, ids) {
+  return withLock(`user:${userKey(user.sub)}`, async () => {
+    const record = readJson(userFile(user.sub), { sub: user.sub, email: user.email, name: user.name, puzzles: [] });
+    const added = [];
+    const missing = [];
+    for (const id of ids) {
+      if (!exists(id)) {
+        missing.push(id);
+        continue;
+      }
+      await withLock(id, () => {
+        const m = meta(id);
+        if (!m.owner) saveMeta(id, { ...m, owner: userKey(user.sub) });
+      });
+      if (!record.puzzles.some((p) => p.id === id)) {
+        record.puzzles.unshift({ id, added: Math.floor(Date.now() / 1000) });
+        added.push(id);
+      }
+    }
+    writeJson(userFile(user.sub), record);
+    return { added, missing };
+  });
+}
+
+export function removeUserPuzzle(user, id) {
+  return withLock(`user:${userKey(user.sub)}`, () => {
+    const record = readJson(userFile(user.sub), null);
+    if (!record) return;
+    record.puzzles = record.puzzles.filter((p) => p.id !== id);
+    writeJson(userFile(user.sub), record);
+  });
+}
+
+/** The account's puzzles, newest first, with their names and piece counts. */
+export function userPuzzles(user) {
+  const record = readJson(userFile(user.sub), { puzzles: [] });
+  const out = [];
+  for (const { id, added } of record.puzzles) {
+    if (!exists(id)) continue;
+    const m = meta(id);
+    let pieces = 0;
+    for (const f of fs.readdirSync(path.join(puzzleDir(id), 'pieces'))) if (/^\d+_contour\.json$/.test(f)) pieces++;
+    const updated = Math.floor(fs.statSync(puzzleDir(id)).mtimeMs / 1000);
+    out.push({ id, name: m.name, created: m.created, added, updated, pieces });
+  }
+  return out.sort((a, b) => b.updated - a.updated);
+}

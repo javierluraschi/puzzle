@@ -7,6 +7,7 @@ import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 import * as store from './store.js';
 import { candidatesFor, confidence, shapeDifference } from './match.js';
+import { currentUser, handleAuth } from './auth.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const PUBLIC = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'public');
@@ -110,6 +111,30 @@ function startSolve(id) {
   });
 }
 
+// --- account ----------------------------------------------------------------------------------
+
+/** GET /me, POST /me/puzzles { ids } (save puzzles to the account), DELETE /me/puzzles/<id>. */
+async function account(req, res, route) {
+  const user = currentUser(req);
+  if (req.method === 'GET' && route === '/me') {
+    if (!user) return send(res, 200, { user: null });
+    return send(res, 200, { user: { name: user.name, email: user.email }, puzzles: store.userPuzzles(user) });
+  }
+  if (!user) throw new HttpError(401, 'Please sign in first');
+  if (req.method === 'POST' && route === '/me/puzzles') {
+    const ids = (await readBody(req)).ids;
+    if (!Array.isArray(ids) || ids.length > 200 || !ids.every((id) => typeof id === 'string')) throw new HttpError(400, 'ids must be a list of puzzle ids');
+    const result = await store.addUserPuzzles(user, [...new Set(ids)]);
+    return send(res, 200, { ...result, puzzles: store.userPuzzles(user) });
+  }
+  const m = route.match(/^\/me\/puzzles\/([a-z0-9]{10})$/);
+  if (req.method === 'DELETE' && m) {
+    await store.removeUserPuzzle(user, m[1]);
+    return send(res, 200, { puzzles: store.userPuzzles(user) });
+  }
+  throw new HttpError(404, 'Not found');
+}
+
 // --- API --------------------------------------------------------------------------------------
 
 function puzzleResponse(id) {
@@ -122,9 +147,13 @@ async function api(req, res, route) {
   const method = req.method;
   if (method === 'GET' && route === '/health') return send(res, 200, { ok: true });
 
+  if (route === '/me' || route.startsWith('/me/')) return account(req, res, route);
+
   if (method === 'POST' && route === '/puzzles') {
     const body = await readBody(req);
     const id = store.createPuzzle(String(body.name ?? '').trim() || 'My puzzle');
+    const user = currentUser(req);
+    if (user) await store.addUserPuzzles(user, [id]);
     return send(res, 201, puzzleResponse(id));
   }
 
@@ -256,9 +285,12 @@ async function api(req, res, route) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const { pathname } = new URL(req.url, 'http://localhost');
+  const url = new URL(req.url, 'http://localhost');
+  const { pathname } = url;
   try {
-    if (pathname.startsWith('/api/')) await api(req, res, pathname.slice(4));
+    if (pathname.startsWith('/auth/')) {
+      if (!(await handleAuth(req, res, pathname, url, store.rememberUser))) throw new HttpError(404, 'Not found');
+    } else if (pathname.startsWith('/api/')) await api(req, res, pathname.slice(4));
     else serveStatic(req, res, pathname);
   } catch (error) {
     if (!(error instanceof HttpError)) console.error(error);

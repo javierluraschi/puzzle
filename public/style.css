@@ -68,6 +68,12 @@ input[type=checkbox] { accent-color: var(--accent); }
 }
 .brand { display: flex; align-items: center; gap: 0.5rem; color: var(--text); text-decoration: none; font-weight: 700; }
 .puzzle-title { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account { margin-left: auto; display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
+.account-name { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.button { display: inline-block; text-decoration: none; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 0.5rem 0.9rem; }
+a.button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+.save-banner { background: var(--panel); border: 1px solid var(--accent); border-radius: 14px; padding: 0.6rem 1rem; margin-bottom: 1rem; max-width: 50rem; }
+.save-banner p { margin: 0.2rem 0 0.6rem; }
 
 main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
 

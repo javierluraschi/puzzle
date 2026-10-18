@@ -13,6 +13,7 @@
   <header class="topbar">
     <a href="/" class="brand" data-link><img src="/favicon.svg" alt="" width="28" height="28"> Jigsaw Scanner</a>
     <span class="puzzle-title" id="puzzle-title"></span>
+    <span class="account" id="account"></span>
   </header>
   <main id="app"></main>
   <div id="scanner-host" hidden></div>
@@ -30,6 +31,7 @@
 
     <section class="recent" id="recent" hidden>
       <h2>Your puzzles</h2>
+      <div class="save-banner" id="save-banner" hidden></div>
       <ul id="recent-list"></ul>
     </section>
 
@@ -54,6 +56,7 @@
   </template>
 
   <template id="puzzle-template">
+    <div class="save-banner" id="puzzle-save" hidden></div>
     <nav class="tabs">
       <button data-tab="scan" class="active">1 · Scan</button>
       <button data-tab="catalog">2 · Catalog <span class="count" id="piece-count">0</span></button>

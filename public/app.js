@@ -6,6 +6,7 @@ const dialog = document.getElementById('dialog');
 const SIDE_NAMES = { flat: 'flat edge', out: 'tab', in: 'blank', unknown: 'side' };
 
 let state = null; // { id, name, pieces: Map(index -> summary), nextLabel, solve, solution, ... }
+let me = { user: null, puzzles: [] }; // the signed-in account and its puzzles
 
 // --- tiny helpers ----------------------------------------------------------------------------
 
@@ -56,6 +57,54 @@ function rememberPuzzle(id, name) {
   localStorage.setItem('puzzles', JSON.stringify(list.slice(0, 20)));
 }
 
+function localPuzzles() {
+  return JSON.parse(localStorage.getItem('puzzles') || '[]');
+}
+
+// --- account ---------------------------------------------------------------------------------
+
+async function loadAccount() {
+  try {
+    me = await api('/me');
+    me.puzzles ||= [];
+  } catch {
+    me = { user: null, puzzles: [] };
+  }
+  renderAccount();
+}
+
+function signInHref() {
+  return '/auth/login?return=' + encodeURIComponent(location.pathname);
+}
+
+function renderAccount() {
+  const slot = document.getElementById('account');
+  if (!me.user) {
+    slot.replaceChildren(h('a', { class: 'button', href: signInHref() }, 'Sign in'));
+    return;
+  }
+  slot.replaceChildren(
+    h('span', { class: 'muted account-name', title: me.user.email }, me.user.name),
+    h('button', { onclick: signOut }, 'Sign out'),
+  );
+}
+
+async function signOut() {
+  await fetch('/auth/logout', { method: 'POST' });
+  me = { user: null, puzzles: [] };
+  renderAccount();
+  route();
+}
+
+const inAccount = (id) => me.puzzles.some((p) => p.id === id);
+
+/** Saves puzzles (by id) to the signed-in account. */
+async function saveToAccount(ids) {
+  const result = await api('/me/puzzles', { method: 'POST', json: { ids } });
+  me.puzzles = result.puzzles;
+  return result;
+}
+
 function navigate(path) {
   history.pushState({}, '', path);
   route();
@@ -89,22 +138,93 @@ function showHome() {
     event.preventDefault();
     const name = new FormData(event.target).get('name');
     const puzzle = await api('/puzzles', { method: 'POST', json: { name } });
+    if (me.user) await loadAccount(); // new puzzles are saved to the account
     navigate('/p/' + puzzle.id);
   });
   document.getElementById('demo-button').addEventListener('click', async (event) => {
     event.target.disabled = true;
     const puzzle = await api('/puzzles', { method: 'POST', json: { name: 'Demo: cats (54 pieces)' } });
     sessionStorage.setItem('demo-' + puzzle.id, '1');
+    if (me.user) await loadAccount();
     navigate('/p/' + puzzle.id);
   });
-  const list = JSON.parse(localStorage.getItem('puzzles') || '[]');
-  if (list.length) {
-    document.getElementById('recent').hidden = false;
-    document.getElementById('recent-list').replaceChildren(...list.map((p) => h('li', {},
-      h('a', { href: '/p/' + p.id, 'data-link': true }, p.name || p.id),
-      h('span', { class: 'muted' }, ' · ' + new Date(p.time).toLocaleDateString()),
-    )));
+  const error = new URLSearchParams(location.search).get('signin_error');
+  if (error) {
+    history.replaceState({}, '', '/');
+    app.querySelector('.hero').append(h('p', { class: 'error' }, error));
   }
+  renderRecent();
+}
+
+/** The account's puzzles and the ones this device remembers, with a way to save the latter. */
+function renderRecent() {
+  const local = localPuzzles();
+  const rows = [
+    ...me.puzzles.map((p) => ({ id: p.id, name: p.name, time: p.updated * 1000, note: `${p.pieces} pieces` })),
+    ...local.filter((p) => !inAccount(p.id)).map((p) => ({ id: p.id, name: p.name, time: p.time, note: me.user ? 'not in your account yet' : null })),
+  ];
+  if (!rows.length) return;
+  document.getElementById('recent').hidden = false;
+  document.getElementById('recent-list').replaceChildren(...rows.map((p) => h('li', {},
+    h('a', { href: '/p/' + p.id, 'data-link': true }, p.name || p.id),
+    h('span', { class: 'muted' }, ' · ' + new Date(p.time).toLocaleDateString()),
+    p.note && h('span', { class: p.note === 'not in your account yet' ? 'warn small' : 'muted small' }, ' · ' + p.note),
+  )));
+
+  const banner = document.getElementById('save-banner');
+  const unsaved = local.filter((p) => !inAccount(p.id));
+  banner.hidden = unsaved.length === 0;
+  if (!unsaved.length) return;
+  if (!me.user) {
+    banner.replaceChildren(
+      h('p', {}, `These puzzles are remembered by this browser only. Sign in to save them to your account and open them on any device.`),
+      h('a', { class: 'button primary', href: signInHref() }, 'Sign in to save them'),
+    );
+    return;
+  }
+  const button = h('button', { class: 'primary' }, `⬆ Save ${unsaved.length === 1 ? 'it' : `all ${unsaved.length}`} to my account`);
+  const status = h('span', { class: 'muted' });
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    status.textContent = ' Saving…';
+    try {
+      const { missing } = await saveToAccount(unsaved.map((p) => p.id));
+      status.textContent = '';
+      renderRecent();
+      if (missing.length) banner.append(h('p', { class: 'warn' }, `${missing.length} of them no longer exist on the server: ${missing.join(', ')}`));
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = ' ' + error.message;
+    }
+  });
+  banner.replaceChildren(
+    h('p', {}, `${unsaved.length} ${unsaved.length === 1 ? 'puzzle on this device is' : 'puzzles on this device are'} not in your account yet. Saving keeps every scanned piece and lets you open them on any device.`),
+    button, status,
+  );
+}
+
+/** On a puzzle page: offer to save it to the account (or to sign in for that). */
+function renderPuzzleSave() {
+  const banner = document.getElementById('puzzle-save');
+  if (!banner) return;
+  banner.hidden = inAccount(state.id);
+  if (banner.hidden) return;
+  if (!me.user) {
+    banner.replaceChildren(h('span', {}, 'Open this puzzle on any device: '), h('a', { href: signInHref() }, 'sign in to save it to your account'));
+    return;
+  }
+  const button = h('button', { class: 'primary' }, '⬆ Save to my account');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      await saveToAccount([state.id]);
+      renderPuzzleSave();
+    } catch (error) {
+      button.disabled = false;
+      banner.append(h('span', { class: 'error' }, ' ' + error.message));
+    }
+  });
+  banner.replaceChildren(h('span', {}, 'This puzzle is not in your account yet. '), button);
 }
 
 async function showPuzzle(id) {
@@ -129,6 +249,7 @@ async function showPuzzle(id) {
   document.getElementById('puzzle-title').textContent = puzzle.name;
 
   app.replaceChildren(document.getElementById('puzzle-template').content.cloneNode(true));
+  renderPuzzleSave();
   for (const button of app.querySelectorAll('.tabs button')) {
     button.addEventListener('click', () => showTab(button.dataset.tab));
   }
@@ -585,4 +706,4 @@ function rotatePlacement(p, times) {
   return { ...p, x, y, top };
 }
 
-route();
+loadAccount().then(route);
