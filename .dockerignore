@@ -1,0 +1,7 @@
+.git
+.env*
+vendor
+data
+tools
+context.tar.gz
+*.md

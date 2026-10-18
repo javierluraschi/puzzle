@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Jigsaw Scanner – catalog and match puzzle pieces with your phone</title>
+  <meta name="description" content="Scan jigsaw pieces one at a time with your phone camera. Exact outlines are traced on the device, every side is classified, and the jigsawlutioner algorithm finds which pieces fit.">
+  <meta name="theme-color" content="#14161b">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand" data-link><img src="/favicon.svg" alt="" width="28" height="28"> Jigsaw Scanner</a>
+    <span class="puzzle-title" id="puzzle-title"></span>
+  </header>
+  <main id="app"></main>
+  <div id="scanner-host" hidden></div>
+
+  <template id="home-template">
+    <section class="hero">
+      <h1>Scan your pieces.<br>See what fits.</h1>
+      <p class="lead">Point your phone at one jigsaw piece at a time. The app traces its exact outline right on your phone, labels it with a number and builds a catalog of every piece's four sides – then tells you which pieces fit together, or assembles as much of the puzzle as it can.</p>
+      <form class="start-form" id="start-form">
+        <input name="name" placeholder="Puzzle name (optional)" maxlength="80" autocomplete="off">
+        <button class="primary" type="submit">Start a catalog</button>
+      </form>
+      <button class="link-button" id="demo-button">or try a demo catalog of 54 real pieces →</button>
+    </section>
+
+    <section class="recent" id="recent" hidden>
+      <h2>Your puzzles</h2>
+      <ul id="recent-list"></ul>
+    </section>
+
+    <section class="how">
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li><strong>Scan</strong> one piece at a time: place it face up on a plain, contrasting surface and hold the phone flat above it. When the outline turns green and you hold still, the app takes a burst of frames and traces the edges with sub-pixel precision.</li>
+        <li><strong>Label</strong>: pieces are numbered 1, 2, 3… automatically (you can change any label). Jot the number on the back of the piece with a pencil, or put it on a numbered sticky note, so you can find it later.</li>
+        <li><strong>Match</strong>: open any piece to see the best candidates for each side, or solve the whole catalog into assembled groups.</li>
+      </ol>
+      <div class="tips">
+        <h3>Tips for exact outlines</h3>
+        <ul>
+          <li>A dark matte cloth (or white paper for dark pieces) and soft, even light – no strong lamp shadows.</li>
+          <li>Hold the phone flat (the level shows when it is) at a distance where the piece fills about a quarter of the screen.</li>
+          <li>For solving whole puzzles, <a href="/card.html" target="_blank">print a scan card</a>: it gives every piece its true size and removes perspective distortion.</li>
+          <li>Busy table? Turn on <em>AI</em> in the scanner: MobileSAM runs on your phone to find the piece (one-time 45 MB download).</li>
+          <li>Only the outline is stored – no photos leave your phone. Matching uses shapes only, so it works best with grid-cut puzzles with distinct shapes (e.g. Ravensburger).</li>
+        </ul>
+      </div>
+      <p class="credits">Piece analysis &amp; solver: <a href="https://github.com/byWulf/jigsawlutioner" target="_blank" rel="noopener">byWulf/jigsawlutioner</a> by Michael Wolf (MIT). On-device segmentation: <a href="https://github.com/ChaoningZhang/MobileSAM" target="_blank" rel="noopener">MobileSAM</a> via <a href="https://onnxruntime.ai" target="_blank" rel="noopener">ONNX Runtime Web</a>. Demo pieces from <a href="https://github.com/byWulf/jigsawlutioner-cli" target="_blank" rel="noopener">jigsawlutioner-cli</a>.</p>
+    </section>
+  </template>
+
+  <template id="puzzle-template">
+    <nav class="tabs">
+      <button data-tab="scan" class="active">1 · Scan</button>
+      <button data-tab="catalog">2 · Catalog <span class="count" id="piece-count">0</span></button>
+      <button data-tab="solve">3 · Solve</button>
+    </nav>
+
+    <section class="tab" id="tab-scan">
+      <div class="scan-start">
+        <button class="primary big" id="scan-button">📷 Scan pieces</button>
+        <p class="muted">Next label: <strong id="scan-next-label">1</strong> – you can change it in the scanner.</p>
+      </div>
+      <div class="tips card-tip">
+        <h3>🖨 For complete solves: use a scan card</h3>
+        <p class="muted">A phone camera does not know how far away the piece is, so without a reference every piece is scaled to the same size – fine for finding neighbours, but the solver assembles more when real sizes are known. <a href="/card.html" target="_blank">Print a scan card</a>, lay each piece in its middle and let the card fill the view: the scanner then also corrects perspective and measures pieces in millimetres.</p>
+      </div>
+      <ol class="steps compact">
+        <li>Put one piece face up in the middle of a plain, contrasting surface.</li>
+        <li>Hold the phone flat above it. When the outline turns green, hold still – capture is automatic.</li>
+        <li>Check the result, write the number on the piece, swap in the next one. Scanning continues by itself.</li>
+      </ol>
+    </section>
+
+    <section class="tab" id="tab-catalog" hidden>
+      <div class="catalog-head">
+        <div class="filters" id="piece-filters">
+          <button data-filter="all" class="active">All</button>
+          <button data-filter="corner">Corners</button>
+          <button data-filter="edge">Edges</button>
+          <button data-filter="inner">Inner</button>
+          <button data-filter="failed">Failed</button>
+        </div>
+        <a class="muted small" id="export-link" download>⤓ export</a>
+      </div>
+      <p class="hint" id="catalog-summary"></p>
+      <div class="piece-grid" id="piece-grid"></div>
+    </section>
+
+    <section class="tab" id="tab-solve" hidden>
+      <div class="solve-bar">
+        <button class="primary" id="solve-button">Solve puzzle</button>
+        <div class="solve-status" id="solve-status"></div>
+      </div>
+      <div class="solve-options" id="solve-options" hidden>
+        <label class="check"><input type="checkbox" id="show-numbers" checked> labels</label>
+        <label class="check"><input type="checkbox" id="show-links"> match quality</label>
+        <label class="check"><input type="checkbox" id="show-singles"> single pieces</label>
+        <label class="zoom">zoom <input type="range" id="zoom" min="0.08" max="0.6" step="0.01" value="0.22"></label>
+      </div>
+      <div id="solution"></div>
+    </section>
+  </template>
+
+  <dialog id="dialog">
+    <div class="dialog-head">
+      <h2 id="dialog-title"></h2>
+      <button class="close" id="dialog-close" aria-label="Close">×</button>
+    </div>
+    <div id="dialog-body"></div>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

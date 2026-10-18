@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scan card – Jigsaw Scanner</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <style>
+    @page { size: A4; margin: 12mm; }
+    body { font: 11pt/1.4 system-ui, sans-serif; color: #111; background: #fff; margin: 0 auto; max-width: 190mm; padding: 8mm; }
+    h1 { font-size: 16pt; margin: 0 0 2mm; }
+    p { margin: 1mm 0 3mm; }
+    .cards { display: grid; grid-template-columns: repeat(2, 86mm); gap: 6mm; justify-content: center; margin: 6mm 0; }
+    figure { margin: 0; text-align: center; }
+    figcaption { font-size: 9pt; color: #555; }
+    svg { display: block; margin: 0 auto; }
+    .check { margin-top: 4mm; }
+    @media screen { .print { margin: 4mm 0; font-size: 13pt; padding: 2mm 5mm; } }
+    @media print { .print, .screen-only { display: none; } }
+  </style>
+</head>
+<body>
+  <h1>Scan card</h1>
+  <p class="screen-only">Print this page at <strong>100% / actual size</strong> (any small scaling error is fine – it is the same for every piece). Cut out one card, lay a piece in the middle and scan. The scanner finds the black frame and uses it to correct the perspective and to measure every piece in millimetres, which makes matches more reliable.</p>
+  <button class="print" onclick="print()">🖨 Print</button>
+  <p>Use a <strong>dark card</strong> for light pieces and a <strong>light card</strong> for dark pieces. Keep the card flat and the piece inside the inner area.</p>
+  <div class="cards" id="cards"></div>
+  <p class="check">Print check – this line should be 50 mm long:</p>
+  <svg width="50mm" height="4mm" viewBox="0 0 50 4"><rect x="0" y="1.5" width="50" height="1" fill="#000"/><rect x="0" y="0" width="0.4" height="4"/><rect x="49.6" y="0" width="0.4" height="4"/></svg>
+  <script>
+    // Must match CARD in /scan/vision.js: 70 mm outer square, 6 mm black ring, 2 mm white gap
+    const OUTER = 70, RING = 6, GAP = 2, MARGIN = 8;
+    const card = (interior, caption) => {
+      const size = OUTER + 2 * MARGIN;
+      const a = MARGIN + RING + GAP;
+      return `<figure>
+        <svg width="${size}mm" height="${size}mm" viewBox="0 0 ${size} ${size}">
+          <rect x="0" y="0" width="${size}" height="${size}" fill="#fff" stroke="#ccc" stroke-width="0.2" stroke-dasharray="1 1"/>
+          <rect x="${MARGIN}" y="${MARGIN}" width="${OUTER}" height="${OUTER}" fill="#000"/>
+          <rect x="${MARGIN + RING}" y="${MARGIN + RING}" width="${OUTER - 2 * RING}" height="${OUTER - 2 * RING}" fill="#fff"/>
+          <rect x="${a}" y="${a}" width="${OUTER - 2 * (RING + GAP)}" height="${OUTER - 2 * (RING + GAP)}" fill="${interior}"/>
+        </svg>
+        <figcaption>${caption}</figcaption>
+      </figure>`;
+    };
+    document.getElementById('cards').innerHTML =
+      card('#3b3f47', 'dark card – for light pieces') + card('#3b3f47', 'dark card – for light pieces') +
+      card('#ffffff', 'light card – for dark pieces') + card('#ffffff', 'light card – for dark pieces');
+  </script>
+</body>
+</html>

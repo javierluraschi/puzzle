@@ -1,0 +1,17 @@
+{
+    "name": "jigsawpuzzlesolver/web",
+    "description": "Web app that solves jigsaw puzzles from photos using bywulf/jigsawlutioner",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": "^8.1",
+        "ext-gd": "*",
+        "bywulf/jigsawlutioner": "dev-main#e384b81f7342143ba8f5f61afda7254ad3a743b7"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}

@@ -1,0 +1,10 @@
+/vendor/
+/data/
+.env
+context.tar.gz
+/public/_t/
+/public/vendor/
+/public/models/
+/public/_tb/
+tools/__pycache__/
+/public/_tc/
