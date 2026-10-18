@@ -1,17 +1,23 @@
-// Accurate contour of one piece from a burst of camera frames.
+// Accurate contour of one piece lying on the scan card, from one or more full-resolution photos.
 //
-// 1. Coarse mask per frame: color-distance segmentation; MobileSAM (ONNX Runtime Web, WebGPU or
-//    WASM) acts as referee on the first frame and takes over when the background is too busy for
-//    thresholding.
-// 2. Sub-pixel refinement of each frame's boundary against the image (vision.refineContour).
-// 3. Blurry frames are dropped; the rest are aligned and fused into one contour.
+// Per photo:
+//   1. find the card (its frame gives the perspective-correcting homography and the scale)
+//   2. coarse piece mask on the card interior with a shadow-free color distance
+//      (optionally MobileSAM when the piece barely differs from the card)
+//   3. sub-pixel refinement at the photo's native resolution in a crop around the piece
+//   4. contour -> card millimetres
+// Then the photos are combined: frames of one placement are averaged; if the piece was turned by
+// 180° for a second placement, the two placements are intersected – a shadow or a lit cardboard
+// rim only ever adds area on one side, so whatever is not in both is not the piece.
 import {
-  segmentForeground, pickCenterComponent, refineContour, fuseContours, normalizeContour, alignTo,
-  polygonArea, boxSum, resampleClosed, isoContours, orient, similarityBetween, warpField, resizeField,
-  detectCard, keepInside, applyHomography,
+  detectCard, keepInside, applyHomography, segmentOnCard, refineOnCard, pickCenterComponent,
+  isoContours, orient, resampleClosed, polygonArea, polygonCentroid, normalizeContour, alignTo,
+  addCoverage, contourDeviation, smoothClosed, resizeField, warpField,
 } from './vision.js';
 
-const PROCESS_SIZE = 1024; // long side of the region processed per frame (also MobileSAM's input size)
+const COARSE_SIZE = 1024; // long side for finding the card
+const INTERIOR_SIZE = 900; // long side of the card interior for the coarse mask
+const FINE_MAX = 1400; // cap for the native-resolution crop around the piece
 const MODEL_CACHE = 'jigsaw-models-v1';
 const MODELS = {
   encoder: '/models/mobile_sam_image_encoder.onnx',
@@ -19,7 +25,7 @@ const MODELS = {
 };
 
 let ort = null;
-let sam = null; // { encoder, decoder, device }
+let sam = null;
 let samLoading = null;
 
 self.onmessage = async ({ data }) => {
@@ -29,6 +35,8 @@ self.onmessage = async ({ data }) => {
       self.postMessage({ id: data.id, result: { device: sam.device } });
     } else if (data.type === 'refine') {
       self.postMessage({ id: data.id, result: await refine(data) });
+    } else if (data.type === 'card') {
+      self.postMessage({ id: data.id, result: findCard(data.bitmap) });
     } else if (data.type === 'warmup') {
       await warmup();
       self.postMessage({ id: data.id, result: true });
@@ -43,7 +51,245 @@ function progress(stage, value) {
   self.postMessage({ type: 'progress', stage, value });
 }
 
-// --- MobileSAM ------------------------------------------------------------------------------------
+// --- live: is the card in view? ---------------------------------------------------------------------
+
+/** Cheap check for the live view: card corners in the coordinates of the (small) bitmap. */
+function findCard(bitmap) {
+  const { pixels, w, h } = draw(bitmap, 1, [0, 0, bitmap.width, bitmap.height]);
+  bitmap.close();
+  const card = detectCard(pixels, w, h);
+  return { corners: card ? card.corners : null, w, h };
+}
+
+// --- one photo -> contour in millimetres -------------------------------------------------------
+
+function draw(bitmap, scale, [sx, sy, sw, sh]) {
+  const w = Math.max(1, Math.round(sw * scale));
+  const h = Math.max(1, Math.round(sh * scale));
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, w, h);
+  return { pixels: ctx.getImageData(0, 0, w, h).data, w, h };
+}
+
+function bbox(points) {
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+async function photoContour(bitmap, { useSam }) {
+  // 1. the card, found on a downscaled copy; mm <-> photo pixels through its homography
+  const cs = COARSE_SIZE / Math.max(bitmap.width, bitmap.height);
+  const coarse = draw(bitmap, cs, [0, 0, bitmap.width, bitmap.height]);
+  const card = detectCard(coarse.pixels, coarse.w, coarse.h);
+  if (!card) throw new Error('Scan card not found – the whole black frame must be in the picture.');
+  const interiorPhoto = card.interior.map(([x, y]) => [x / cs, y / cs]);
+
+  // 2. coarse mask on the card interior
+  const [ix0, iy0, ix1, iy1] = bbox(interiorPhoto);
+  const iRect = [Math.floor(ix0), Math.floor(iy0), Math.ceil(ix1 - ix0), Math.ceil(iy1 - iy0)];
+  const is = Math.min(1, INTERIOR_SIZE / Math.max(iRect[2], iRect[3]));
+  const interior = draw(bitmap, is, iRect);
+  keepInside(interior.pixels, interior.w, interior.h, interiorPhoto.map(([x, y]) => [(x - iRect[0]) * is, (y - iRect[1]) * is]));
+  let { mask, contrast } = segmentOnCard(interior.pixels, interior.w, interior.h);
+  let piece = pickCenterComponent(mask, interior.w, interior.h);
+  let engine = 'shadow-free';
+  if ((!piece || piece.touchesBorder || contrast < 0.5) && useSam && (await loadSam().catch(() => null))) {
+    const prob = await samMask(interior.pixels, interior.w, interior.h, [interior.w / 2, interior.h / 2]);
+    mask = Uint8Array.from(prob, (v) => (v > 0.5 ? 1 : 0));
+    piece = pickCenterComponent(mask, interior.w, interior.h);
+    engine = 'mobilesam';
+  }
+  if (!piece) throw new Error('No piece found on the card.');
+  if (piece.touchesBorder) throw new Error('The piece touches the card frame – place it in the middle.');
+
+  // 3. native-resolution crop around the piece, the coarse mask as prior
+  const [px0, py0, px1, py1] = piece.bbox.map((v) => v / is);
+  const margin = Math.max(px1 - px0, py1 - py0) * 0.12 + 8;
+  const fx = Math.max(0, Math.floor(iRect[0] + px0 - margin));
+  const fy = Math.max(0, Math.floor(iRect[1] + py0 - margin));
+  const fRect = [fx, fy, Math.min(bitmap.width - fx, Math.ceil(px1 - px0 + 2 * margin)), Math.min(bitmap.height - fy, Math.ceil(py1 - py0 + 2 * margin))];
+  const fs = Math.min(1, FINE_MAX / Math.max(fRect[2], fRect[3]));
+  const fine = draw(bitmap, fs, fRect);
+  keepInside(fine.pixels, fine.w, fine.h, interiorPhoto.map(([x, y]) => [(x - fRect[0]) * fs, (y - fRect[1]) * fs]));
+  // interior pixel u -> photo (iRect + (u + 0.5) / is) -> fine pixel ((photo - fRect) * fs - 0.5)
+  const k = fs / is;
+  const prior = warpField(Float32Array.from(piece.mask), interior.w, interior.h,
+    { a: k, b: 0, tx: (iRect[0] - fRect[0]) * fs + (k - 1) / 2, ty: (iRect[1] - fRect[1]) * fs + (k - 1) / 2 }, fine.w, fine.h);
+  let area = 0;
+  for (const v of prior) if (v > 0.5) area++;
+  const band = Math.max(4, Math.round(Math.sqrt(area) * 0.03));
+  const refined = refineOnCard(fine.pixels, fine.w, fine.h, prior, band);
+  if (!refined.contour) throw new Error('No clear outline found.');
+
+  // 4. fine pixels -> photo pixels -> card millimetres
+  const photo = refined.contour.map(([x, y]) => [(x + 0.5) / fs + fRect[0], (y + 0.5) / fs + fRect[1]]);
+  const mm = photo.map(([x, y]) => applyHomography(card.H, [x * cs, y * cs]));
+  return {
+    mm,
+    toPhoto: (p) => applyHomography(card.Hinv, p).map((v) => v / cs),
+    photoSize: [bitmap.width, bitmap.height],
+    photo,
+    pxPerMm: (card.pixelsPerMm / cs) * fs,
+    sharpness: refined.sharpness,
+    contrast: refined.contrast,
+    noise: refined.noise,
+    engine,
+  };
+}
+
+// --- combining photos ------------------------------------------------------------------------------
+
+/**
+ * Outlines (millimetres) aligned rigidly to the first and combined on a common grid: by mean
+ * (frames of one placement) or by min (placements with the piece turned in between). The result
+ * is in the coordinates of the first outline.
+ */
+function combine(outlines, mode, angles) {
+  const center = polygonCentroid(outlines[0]);
+  const scale = Math.sqrt(Math.abs(polygonArea(outlines[0])));
+  const toUnit = (poly) => poly.map(([x, y]) => [(x - center[0]) / scale, (y - center[1]) / scale]);
+  const reference = toUnit(outlines[0]);
+  const aligned = outlines.map((poly, i) => {
+    if (i === 0) return reference;
+    const own = toUnit(poly);
+    const c = polygonCentroid(own);
+    // the size is known on the card, so the alignment is rigid (no rescaling)
+    return alignTo(own.map(([x, y]) => [x - c[0], y - c[1]]), reference, { initialAngles: angles, scale: false }).points;
+  });
+  const size = 720;
+  const extent = 1.05;
+  const grids = aligned.map((poly) => {
+    const acc = new Float32Array(size * size);
+    addCoverage(acc, size, extent, resampleClosed(poly, 900));
+    return acc;
+  });
+  const out = new Float32Array(size * size);
+  for (let i = 0; i < out.length; i++) {
+    let v = mode === 'min' ? Infinity : 0;
+    for (const g of grids) v = mode === 'min' ? Math.min(v, g[i]) : v + g[i];
+    out[i] = mode === 'min' ? v : v / grids.length;
+  }
+  const loops = isoContours(out, size, size, 0.5);
+  const toMm = (v) => (v / size) * 2 * extent - extent;
+  const contour = orient(loops[0].map(([x, y]) => [toMm(x) * scale + center[0], toMm(y) * scale + center[1]]));
+  const unit = toUnit(contour);
+  return { contour, deviations: aligned.map((poly) => contourDeviation(poly, unit)) };
+}
+
+async function refine({ frames, useSam = false, options = {} }) {
+  const started = performance.now();
+  const results = [];
+  const errors = [];
+  for (let f = 0; f < frames.length; f++) {
+    progress('refine', f / frames.length);
+    try {
+      results.push({ ...(await photoContour(frames[f].bitmap, { useSam })), placement: frames[f].placement || 0, frame: f });
+    } catch (error) {
+      errors.push(error.message);
+    } finally {
+      frames[f].bitmap.close();
+    }
+  }
+  progress('refine', 1);
+  if (!results.length) throw new Error(errors[0] || 'No outline found.');
+
+  // per placement: drop blurred frames, average the rest
+  const placements = [];
+  for (const p of [...new Set(results.map((r) => r.placement))].sort()) {
+    const group = results.filter((r) => r.placement === p);
+    const maxSharp = Math.max(...group.map((r) => r.sharpness));
+    const sharp = group.filter((r) => r.sharpness >= maxSharp * 0.6);
+    const fused = sharp.length > 1 ? combine(sharp.map((r) => r.mm), 'mean', [-0.1, 0, 0.1]) : { contour: sharp[0].mm, deviations: [0] };
+    placements.push({ contour: fused.contour, frames: sharp, deviation: mean(fused.deviations.slice(1)) });
+  }
+  if (options.placementsRequired && placements.length < options.placementsRequired) {
+    throw new Error('The card was not found in the turned photo – try again.');
+  }
+
+  // turned placements: intersect (alignment tries all rotations; the user was asked for 180°)
+  let final = placements[0].contour;
+  let turnDifference = null;
+  if (placements.length > 1) {
+    const both = combine(placements.map((p) => p.contour), 'min', Array.from({ length: 12 }, (_, i) => (i * Math.PI) / 6));
+    final = both.contour;
+    turnDifference = both.deviations[1];
+  }
+
+  // a touch of smoothing along the outline (0.08 mm) removes pixel jitter but keeps the corners
+  final = resampleClosed(final, 1600);
+  const mmPerPoint = perimeterOf(final) / final.length;
+  final = smoothClosed(final, 0.08 / mmPerPoint);
+
+  const sizeMm = Math.sqrt(Math.abs(polygonArea(final)));
+  const reference = placements[0].frames[0];
+  return {
+    sizeMm: round(sizeMm, 3),
+    contour: resampleClosed(normalizeContour(final).points, 1000).map(([x, y]) => [round(x * 1000, 1), round(y * 1000, 1)]),
+    // the outline on the reference photo, for the confirmation screen
+    preview: { frame: reference.frame, contour: resampleClosed(final, 500).map(reference.toPhoto) },
+    debug: options.debug ? { photos: results.map((r) => ({ frame: r.frame, placement: r.placement, photo: r.photo })), final: final.map(reference.toPhoto), errors } : undefined,
+    quality: {
+      frames: frames.length,
+      used: placements.reduce((s, p) => s + p.frames.length, 0),
+      placements: placements.length,
+      // disagreement between frames / between the turned placements, % of the piece size
+      deviation: round(mean(placements.map((p) => p.deviation)) * 100, 3),
+      turnDifference: turnDifference === null ? null : round(turnDifference * 100, 3),
+      contrast: round(mean(results.map((r) => r.contrast)), 1),
+      sharpness: round(mean(results.map((r) => r.sharpness)), 1),
+      pixelsPerMm: round(mean(results.map((r) => r.pxPerMm)), 1),
+      pixelsPerPiece: round(sizeMm * mean(results.map((r) => r.pxPerMm))),
+      photo: results[0].photoSize,
+      engine: results.some((r) => r.engine === 'mobilesam') ? 'mobilesam' : 'shadow-free',
+      card: true,
+      ms: Math.round(performance.now() - started),
+    },
+  };
+}
+
+function perimeterOf(poly) {
+  let s = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) s += Math.hypot(poly[i][0] - poly[j][0], poly[i][1] - poly[j][1]);
+  return s;
+}
+
+function mean(values) {
+  const v = values.filter((x) => Number.isFinite(x));
+  return v.length ? v.reduce((s, x) => s + x, 0) / v.length : 0;
+}
+
+function round(v, digits = 2) {
+  const f = 10 ** digits;
+  return Math.round(v * f) / f;
+}
+
+/** Runs the pipeline once on a synthetic card so the first real scan is not slowed by JIT warm-up. */
+async function warmup() {
+  const canvas = new OffscreenCanvas(900, 900);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#eeeee8';
+  ctx.fillRect(0, 0, 900, 900);
+  ctx.fillStyle = '#121214';
+  ctx.fillRect(100, 100, 700, 700);
+  ctx.fillStyle = '#eeeee8';
+  ctx.fillRect(160, 160, 580, 580);
+  ctx.fillStyle = '#343840';
+  ctx.fillRect(180, 180, 540, 540);
+  ctx.fillStyle = '#6a8ad0';
+  ctx.beginPath();
+  ctx.ellipse(450, 450, 110, 90, 0.3, 0, Math.PI * 2);
+  ctx.fill();
+  try {
+    await refine({ frames: [{ bitmap: canvas.transferToImageBitmap() }] });
+  } catch {
+    // only for warming up
+  }
+}
+
+// --- MobileSAM (optional, for pieces that barely differ from the card) ------------------------------
 
 async function loadSam() {
   if (sam) return sam;
@@ -57,8 +303,7 @@ async function loadSam() {
       progress('download', 1);
       for (const device of navigator.gpu ? ['webgpu', 'wasm'] : ['wasm']) {
         try {
-          const options = { executionProviders: [device], graphOptimizationLevel: 'all' };
-          const encoder = await ort.InferenceSession.create(encoderBytes, options);
+          const encoder = await ort.InferenceSession.create(encoderBytes, { executionProviders: [device], graphOptimizationLevel: 'all' });
           const decoder = await ort.InferenceSession.create(decoderBytes, { executionProviders: ['wasm'] });
           sam = { encoder, decoder, device };
           return sam;
@@ -73,7 +318,6 @@ async function loadSam() {
   return samLoading;
 }
 
-/** Downloads a model once and keeps it in the Cache Storage for offline / next visits. */
 async function fetchCached(url, onProgress) {
   const cache = await caches.open(MODEL_CACHE).catch(() => null);
   const cached = cache && (await cache.match(url));
@@ -104,399 +348,48 @@ async function fetchCached(url, onProgress) {
   return bytes;
 }
 
-/**
- * MobileSAM mask (as probabilities) for the piece. Prompt: { box: [x0, y0, x1, y1] } or
- * { point: [x, y] } (the piece the user aims at).
- */
-async function samMask(pixels, w, h, prompt) {
-  const input = new Float32Array(w * h * 3);
-  for (let i = 0; i < w * h; i++) {
-    input[i * 3] = pixels[i * 4];
-    input[i * 3 + 1] = pixels[i * 4 + 1];
-    input[i * 3 + 2] = pixels[i * 4 + 2];
+/** MobileSAM probability mask for the piece at `point` (most confident plausible candidate). */
+async function samMask(pixels, w, h, point) {
+  // the export resizes/normalizes inside the graph but expects the long side to be 1024
+  const s = 1024 / Math.max(w, h);
+  const sw = Math.round(w * s);
+  const sh = Math.round(h * s);
+  const src = new OffscreenCanvas(w, h);
+  src.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels), w, h), 0, 0);
+  const canvas = new OffscreenCanvas(sw, sh);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(src, 0, 0, sw, sh);
+  const scaled = ctx.getImageData(0, 0, sw, sh).data;
+  const input = new Float32Array(sw * sh * 3);
+  for (let i = 0; i < sw * sh; i++) {
+    input[i * 3] = scaled[i * 4];
+    input[i * 3 + 1] = scaled[i * 4 + 1];
+    input[i * 3 + 2] = scaled[i * 4 + 2];
   }
-  // This export resizes/normalizes inside the graph; it expects the image already scaled so its
-  // long side is 1024, with prompt coordinates in that frame.
-  const { image_embeddings: embeddings } = await sam.encoder.run({ input_image: new ort.Tensor('float32', input, [h, w, 3]) });
-  // a box is two points labelled 2 and 3 (optionally after a positive point, label 1); a lone
-  // point needs a padding point (label -1)
-  const coords = prompt.box ? [...(prompt.point ?? []), ...prompt.box] : [...prompt.point, 0, 0];
-  const labels = prompt.box ? [...(prompt.point ? [1] : []), 2, 3] : [1, -1];
+  const { image_embeddings: embeddings } = await sam.encoder.run({ input_image: new ort.Tensor('float32', input, [sh, sw, 3]) });
   const out = await sam.decoder.run({
     image_embeddings: embeddings,
-    point_coords: new ort.Tensor('float32', Float32Array.from(coords), [1, labels.length, 2]),
-    point_labels: new ort.Tensor('float32', Float32Array.from(labels), [1, labels.length]),
+    point_coords: new ort.Tensor('float32', Float32Array.from([point[0] * s, point[1] * s, 0, 0]), [1, 2, 2]),
+    point_labels: new ort.Tensor('float32', Float32Array.from([1, -1]), [1, 2]),
     mask_input: new ort.Tensor('float32', new Float32Array(256 * 256), [1, 1, 256, 256]),
     has_mask_input: new ort.Tensor('float32', Float32Array.from([0]), [1]),
-    orig_im_size: new ort.Tensor('float32', Float32Array.from([h, w]), [2]),
+    orig_im_size: new ort.Tensor('float32', Float32Array.from([sh, sw]), [2]),
   });
   const [, count] = out.masks.dims;
   const scores = out.iou_predictions.data;
   const logits = out.masks.data;
-  embeddings.dispose?.();
-
-  // Output 0 is SAM's single best guess (right for box prompts). A single point is ambiguous
-  // (a print detail, the piece, or the piece plus table), so pick the multi-mask candidate SAM is
-  // most confident about among those of sensible size that do not touch the border.
   let pick = 0;
-  if (!prompt.box) {
-    let bestScore = 0.6;
-    for (let m = 1; m < count; m++) {
-      let area = 0;
-      let border = 0;
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          if (logits[m * w * h + y * w + x] <= 0) continue;
-          area++;
-          if (x === 0 || y === 0 || x === w - 1 || y === h - 1) border++;
-        }
-      }
-      const fraction = area / (w * h);
-      if (border > (w + h) * 0.01 || fraction < 0.02 || fraction > 0.6) continue;
-      if (scores[m] > bestScore) {
-        bestScore = scores[m];
-        pick = m;
-      }
+  let best = 0.6;
+  for (let m = 1; m < count; m++) {
+    let area = 0;
+    for (let i = m * sw * sh; i < (m + 1) * sw * sh; i++) if (logits[i] > 0) area++;
+    const fraction = area / (sw * sh);
+    if (fraction > 0.01 && fraction < 0.6 && scores[m] > best) {
+      best = scores[m];
+      pick = m;
     }
   }
-  const prob = new Float32Array(w * h);
-  const base = pick * w * h;
-  for (let i = 0; i < prob.length; i++) prob[i] = 1 / (1 + Math.exp(-logits[base + i]));
-  return { prob, score: scores[pick] };
-}
-
-// --- refinement pipeline -------------------------------------------------------------------------
-
-/**
- * Runs the pipeline once on a synthetic piece while the user is still aiming the camera, so the
- * JavaScript engine has optimized the hot loops before the first real scan.
- */
-async function warmup() {
-  const frames = [];
-  for (let k = 0; k < 2; k++) {
-    const canvas = new OffscreenCanvas(640, 480);
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#2d3138';
-    ctx.fillRect(0, 0, 640, 480);
-    ctx.fillStyle = '#d8a040';
-    ctx.beginPath();
-    ctx.ellipse(320 + k, 240, 110, 90, 0.3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillRect(220, 200, 230, 100);
-    frames.push({ bitmap: canvas.transferToImageBitmap() });
-  }
-  try {
-    await refine({ frames, useSam: false, options: {} });
-  } catch {
-    // only for warming up
-  }
-}
-
-async function refine({ frames, useSam, options }) {
-  const frameSize = [frames[0].bitmap.width, frames[0].bitmap.height];
-  const started = performance.now();
-  if (useSam) {
-    try {
-      await loadSam();
-    } catch (error) {
-      console.warn('continuing without MobileSAM', error);
-    }
-  }
-
-  const prepared = [];
-  const classics = [];
-  for (const { bitmap } of frames) {
-    let frame = framePixels(bitmap, options);
-    let classic = classicPrior(frame.pixels, frame.w, frame.h, options);
-    // the preview can see only part of a low-contrast piece; then use the whole frame
-    if (!classic && frame.cropped) {
-      frame = framePixels(bitmap, options, false);
-      classic = classicPrior(frame.pixels, frame.w, frame.h, options);
-    }
-    bitmap.close();
-    prepared.push(frame);
-    classics.push(classic);
-  }
-  const results = [];
-  let mode = 'classic';
-  let samScore = null;
-  let samPrior0 = null;
-  let debugInfo = null;
-
-  if (sam) {
-    // MobileSAM, prompted with the point the user aims at (the frame center), does not depend on
-    // the background being plain. If it agrees with thresholding, thresholding + refinement is the
-    // most precise; otherwise the background is too busy and every frame is segmented with SAM.
-    const { pixels, w, h, offset, scale } = prepared[0];
-    const aim = [(frameSize[0] / 2 - offset[0]) * scale, (frameSize[1] / 2 - offset[1]) * scale];
-    const prompt = classics[0] ? { box: expandBox(classics[0].bbox, w, h, 0.06) } : { point: aim };
-    const { prob, score } = await samMask(pixels, w, h, prompt);
-    samScore = score;
-    samPrior0 = prob;
-    if (options.debug) debugInfo = { prompt, classicBox: classics[0]?.bbox ?? null, w, h, offset, scale, sam0: contourOfField(prob, w, h).map(([x, y]) => [x / scale + offset[0], y / scale + offset[1]]) };
-    const agreement = classics[0] ? iou(classics[0].prior, prob) : 0;
-    if (agreement < 0.9 && score > 0.6) mode = 'sam';
-    else if (options.priorMix === 'sam' || options.priorMix === 'average') mode = 'sam-prior';
-  }
-
-  for (let f = 0; f < prepared.length; f++) {
-    progress('refine', f / prepared.length);
-    const { pixels, w, h, scale, offset } = prepared[f];
-    const classic = classics[f];
-    let prior = classic?.prior ?? null;
-
-    if (mode === 'sam') {
-      if (f === 0) {
-        prior = samPrior0;
-      } else {
-        // track the piece: prompt with the previous frame's SAM outline, mapped into this frame
-        const prev = results[results.length - 1];
-        const box = prev ? boxOf(prev.contour, prepared[f]) : null;
-        const inside = prev ? insidePoint(prev.contour, prepared[f]) : null;
-        prior = (await samMask(pixels, w, h, box ? { box: expandBox(box, w, h, 0.05), point: inside } : { point: [w / 2, h / 2] })).prob;
-      }
-    } else if (mode === 'sam-prior' && classic && classics[0]) {
-      // carry frame 0's SAM mask into this frame through the alignment of the two outlines
-      const samPrior = f === 0 ? samPrior0 : warpField(samPrior0, prepared[0].w, prepared[0].h, similarityBetween(classics[0].contour, classic.contour), w, h);
-      prior = options.priorMix === 'average' ? average(classic.prior, samPrior) : samPrior;
-    }
-    if (!prior) continue;
-
-    const area = countAbove(prior, 0.5);
-    if (area < 500) continue;
-    const band = Math.max(3, Math.round(Math.sqrt(area) * 0.03));
-    const { contour, contrast, sharpness } = refineAround(pixels, w, h, prior, band);
-    if (!contour || contour.length < 50) continue;
-    results.push({
-      frame: f,
-      // back to the coordinates of the bitmap that was sent
-      contour: contour.map(([x, y]) => [(x + 0.5) / scale + offset[0], (y + 0.5) / scale + offset[1]]),
-      // on the card: perspective-corrected, in millimetres
-      contourMm: prepared[f].card ? contour.map(([x, y]) => applyHomography(prepared[f].card.H, [x + 0.5, y + 0.5])) : null,
-      contrast,
-      sharpness,
-    });
-  }
-  progress('refine', 1);
-  if (!results.length) throw new Error('No clear outline found – try a plainer, more contrasting background.');
-
-  // Motion-blurred frames have soft edges: keep the sharper ones
-  const maxSharp = Math.max(...results.map((r) => r.sharpness));
-  let sharp = results.filter((r) => r.sharpness >= maxSharp * 0.6);
-  sharp.sort((a, b) => b.sharpness - a.sharpness);
-  // with the card in (most) frames, fuse the perspective-corrected millimetre outlines
-  const onCard = sharp.filter((r) => r.contourMm);
-  const cardMode = onCard.length >= Math.max(1, Math.ceil(sharp.length / 2));
-  if (cardMode) sharp = onCard;
-  const shapes = sharp.map((r) => (cardMode ? r.contourMm : r.contour));
-
-  const fused = sharp.length > 1 ? fuseContours(shapes) : { contour: normalizeContour(shapes[0]).points, deviations: [0], kept: [0], reference: 0 };
-  const keptFrames = fused.kept.map((i) => sharp[i]);
-  const meanDeviation = fused.kept.reduce((s, i) => s + fused.deviations[i], 0) / fused.kept.length;
-
-  // the fused outline drawn over the reference frame, for the confirmation screen
-  const ref = sharp[fused.reference];
-  const refNorm = normalizeContour(ref.contour);
-  const onRef = alignTo(fused.contour, refNorm.points).points.map(([x, y]) => [x * refNorm.scale + refNorm.center[0], y * refNorm.scale + refNorm.center[1]]);
-
-  const debug = options.debug ? {
-    classic: classics.map((c, i) => c && c.contour.map(([x, y]) => [(x + 0.5) / prepared[i].scale + prepared[i].offset[0], (y + 0.5) / prepared[i].scale + prepared[i].offset[1]])),
-    refined: results.map((r) => ({ frame: r.frame, contour: r.contour, sharpness: r.sharpness, contrast: r.contrast })),
-    ...debugInfo,
-  } : undefined;
-
-  // true size: sqrt(area) in millimetres, the median over the fused frames
-  const sizes = fused.kept.map((i) => Math.sqrt(Math.abs(polygonArea(shapes[i])))).sort((a, b) => a - b);
-  const sizeMm = cardMode ? sizes[Math.floor(sizes.length / 2)] : null;
-
-  return {
-    debug,
-    sizeMm: sizeMm === null ? null : round(sizeMm, 3),
-    contour: resampleClosed(fused.contour, 1000).map(([x, y]) => [round(x * 1000, 1), round(y * 1000, 1)]),
-    preview: { frame: ref.frame, contour: resampleClosed(onRef, 400) },
-    quality: {
-      frames: frames.length,
-      used: keptFrames.length,
-      // average disagreement between frames, in % of the piece size: lower is better
-      deviation: round(meanDeviation * 100, 3),
-      contrast: round(keptFrames.reduce((s, r) => s + r.contrast, 0) / keptFrames.length, 1),
-      sharpness: round(keptFrames.reduce((s, r) => s + r.sharpness, 0) / keptFrames.length, 1),
-      pixelsPerPiece: round(Math.sqrt(Math.abs(polygonArea(ref.contour)))),
-      engine: mode,
-      card: cardMode,
-      samDevice: sam?.device ?? null,
-      samScore: samScore === null ? null : round(samScore, 3),
-      ms: Math.round(performance.now() - started),
-    },
-  };
-}
-
-/**
- * Pixels of the region around the piece, scaled so its long side is PROCESS_SIZE. The piece is
- * located on a small preview first so that full-resolution work is spent on the piece only.
- */
-function framePixels(bitmap, options, crop = true) {
-  const previewScale = 320 / Math.max(bitmap.width, bitmap.height);
-  const pw = Math.round(bitmap.width * previewScale);
-  const ph = Math.round(bitmap.height * previewScale);
-  const preview = new OffscreenCanvas(pw, ph);
-  const pctx = preview.getContext('2d', { willReadFrequently: true });
-  pctx.drawImage(bitmap, 0, 0, pw, ph);
-  const previewPixels = pctx.getImageData(0, 0, pw, ph).data;
-  const previewCard = detectCard(previewPixels, pw, ph);
-  const found = previewCard ? null : pickCenterComponent(segmentForeground(previewPixels, pw, ph, options).mask, pw, ph);
-
-  let [sx, sy, sw, sh] = [0, 0, bitmap.width, bitmap.height];
-  if (crop && previewCard) {
-    // the whole card (its corners give scale and perspective), with a small margin
-    const xs = previewCard.corners.map((p) => p[0] / previewScale);
-    const ys = previewCard.corners.map((p) => p[1] / previewScale);
-    const m = (Math.max(...xs) - Math.min(...xs)) * 0.04;
-    sx = Math.max(0, Math.round(Math.min(...xs) - m));
-    sy = Math.max(0, Math.round(Math.min(...ys) - m));
-    sw = Math.min(bitmap.width - sx, Math.round(Math.max(...xs) - Math.min(...xs) + 2 * m));
-    sh = Math.min(bitmap.height - sy, Math.round(Math.max(...ys) - Math.min(...ys) + 2 * m));
-  } else if (crop && found && !found.touchesBorder) {
-    const [x0, y0, x1, y1] = found.bbox.map((v) => v / previewScale);
-    const side = Math.max(x1 - x0, y1 - y0) * 2.2;
-    const cx = (x0 + x1) / 2;
-    const cy = (y0 + y1) / 2;
-    sx = Math.max(0, Math.round(cx - side / 2));
-    sy = Math.max(0, Math.round(cy - side / 2));
-    sw = Math.min(bitmap.width - sx, Math.round(side));
-    sh = Math.min(bitmap.height - sy, Math.round(side));
-  }
-  const scale = PROCESS_SIZE / Math.max(sw, sh);
-  const w = Math.round(sw * scale);
-  const h = Math.round(sh * scale);
-  const canvas = new OffscreenCanvas(w, h);
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, w, h);
-  const pixels = ctx.getImageData(0, 0, w, h).data;
-  // On the card, only its interior matters: blank out the black ring and everything outside so
-  // that neither thresholding nor SAM can pick them up
-  const card = previewCard ? detectCard(pixels, w, h) : null;
-  if (card) keepInside(pixels, w, h, card.interior);
-  return { pixels, w, h, scale, offset: [sx, sy], cropped: sw < bitmap.width || sh < bitmap.height, card };
-}
-
-/**
- * Coarse piece mask by color thresholding, computed at half resolution: it only has to be within
- * the refinement band of the true edge.
- */
-function classicPrior(pixels, w, h, options) {
-  const hw = Math.round(w / 2);
-  const hh = Math.round(h / 2);
-  const half = new Uint8ClampedArray(hw * hh * 4);
-  for (let y = 0; y < hh; y++) {
-    for (let x = 0; x < hw; x++) {
-      const o = (y * hw + x) * 4;
-      for (let k = 0; k < 3; k++) {
-        let v = 0;
-        let c = 0;
-        for (let dy = 0; dy < 2; dy++) {
-          for (let dx = 0; dx < 2; dx++) {
-            const sx = Math.min(w - 1, x * 2 + dx);
-            const sy = Math.min(h - 1, y * 2 + dy);
-            v += pixels[(sy * w + sx) * 4 + k];
-            c++;
-          }
-        }
-        half[o + k] = v / c;
-      }
-      half[o + 3] = 255;
-    }
-  }
-  const { mask } = segmentForeground(half, hw, hh, options);
-  const piece = pickCenterComponent(mask, hw, hh);
-  if (!piece || piece.touchesBorder) return null;
-  const soft = resizeField(Float32Array.from(piece.mask), hw, hh, w, h);
-  const loops = isoContours(soft, w, h, 0.5);
-  if (!loops.length) return null;
-  return { prior: soft, bbox: piece.bbox.map((v) => v * 2), contour: orient(loops[0]) };
-}
-
-/** refineContour on the sub-image around the prior's boundary only. */
-function refineAround(pixels, w, h, prior, band) {
-  let x0 = w, y0 = h, x1 = 0, y1 = 0;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (prior[y * w + x] <= 0.5) continue;
-      if (x < x0) x0 = x;
-      if (x > x1) x1 = x;
-      if (y < y0) y0 = y;
-      if (y > y1) y1 = y;
-    }
-  }
-  const m = band * 4 + 4;
-  x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m);
-  x1 = Math.min(w - 1, x1 + m); y1 = Math.min(h - 1, y1 + m);
-  const sw = x1 - x0 + 1;
-  const sh = y1 - y0 + 1;
-  const subPixels = new Uint8ClampedArray(sw * sh * 4);
-  const subPrior = new Float32Array(sw * sh);
-  for (let y = 0; y < sh; y++) {
-    subPixels.set(pixels.subarray(((y + y0) * w + x0) * 4, ((y + y0) * w + x0 + sw) * 4), y * sw * 4);
-    subPrior.set(prior.subarray((y + y0) * w + x0, (y + y0) * w + x0 + sw), y * sw);
-  }
-  const result = refineContour(subPixels, sw, sh, subPrior, band);
-  if (result.contour) result.contour = result.contour.map(([x, y]) => [x + x0, y + y0]);
-  return result;
-}
-
-function contourOfField(field, w, h) {
-  const loops = isoContours(field, w, h, 0.5);
-  return loops.length ? loops[0] : [];
-}
-
-function average(a, b) {
-  const out = new Float32Array(a.length);
-  for (let i = 0; i < a.length; i++) out[i] = (a[i] + b[i]) / 2;
-  return out;
-}
-
-function expandBox([x0, y0, x1, y1], w, h, margin) {
-  const mx = (x1 - x0) * margin;
-  const my = (y1 - y0) * margin;
-  return [Math.max(0, x0 - mx), Math.max(0, y0 - my), Math.min(w - 1, x1 + mx), Math.min(h - 1, y1 + my)];
-}
-
-/** Bounding box of a contour given in bitmap coordinates, in the processed frame's pixels. */
-function boxOf(contour, { scale, offset }) {
-  const xs = contour.map(([x]) => (x - offset[0]) * scale);
-  const ys = contour.map(([, y]) => (y - offset[1]) * scale);
-  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-}
-
-/** A point well inside the contour (its centroid, or the deepest point if the centroid is outside). */
-function insidePoint(contour, { scale, offset }) {
-  const pts = contour.map(([x, y]) => [(x - offset[0]) * scale, (y - offset[1]) * scale]);
-  let cx = 0;
-  let cy = 0;
-  for (const [x, y] of pts) { cx += x; cy += y; }
-  return [cx / pts.length, cy / pts.length];
-}
-
-function iou(a, b) {
-  let inter = 0;
-  let union = 0;
-  for (let i = 0; i < a.length; i++) {
-    const p = a[i] > 0.5;
-    const q = b[i] > 0.5;
-    if (p && q) inter++;
-    if (p || q) union++;
-  }
-  return union ? inter / union : 0;
-}
-
-function countAbove(field, level) {
-  let n = 0;
-  for (let i = 0; i < field.length; i++) if (field[i] > level) n++;
-  return n;
-}
-
-function round(v, digits = 2) {
-  const f = 10 ** digits;
-  return Math.round(v * f) / f;
+  const prob = new Float32Array(sw * sh);
+  for (let i = 0; i < prob.length; i++) prob[i] = 1 / (1 + Math.exp(-logits[pick * sw * sh + i]));
+  return resizeField(prob, sw, sh, w, h);
 }

@@ -10,37 +10,34 @@ assemble the catalog into groups.
 
 ## Using it
 
-1. **Scan.** Put one piece face up on a plain, contrasting surface and hold the phone flat above
-   it. When the outline turns green, hold still and the scanner captures automatically. Labels
-   count up from 1. You can change them in the scanner or in the catalog.
-2. **Swap.** Write the number on the back of the piece and put the next one down. Scanning
-   restarts once the scanner sees an empty view or a different piece.
-3. **Match / solve.** Open a piece to see what fits each side, or solve the whole catalog.
+1. **Print the [scan card](public/card.html)**, a 70 mm black frame. It is required: it corrects
+   perspective and gives every piece its true size in mm.
+2. **Scan.** Put one piece in the middle of the card and hold the phone flat so the card fills the
+   view. When the frame turns green and you hold still, the photo is taken automatically. You can
+   also tap ●, or use 🖼 to take the photo with the phone's camera app (full resolution, flash).
+   Labels count up from 1, and you can edit them.
+3. **Review**, write the number on the back of the piece, then tap *Next piece*.
+4. **Match / solve.** Open a piece to see what fits each side, or solve the whole catalog.
 
-For complete solves, print the [scan card](public/card.html), a 70 mm black frame, and scan each
-piece in its middle. The card corrects perspective and gives every piece its true size in mm.
-Without the card, every piece is scaled to the same size. That still works well for finding
-neighbours, but the solver assembles fewer pieces. On the 54-piece demo set it placed all 54 with
-known sizes and 49 with normalized sizes.
+Optional: **🔦** turns on a continuous light where the browser supports it (fewer shadows). **↻ 2×**
+takes two captures with the piece turned 180° in between and keeps only what is in both, which
+cancels any remaining shadow.
 
 ## How the scanner works (all on the device)
 
 | Stage | Where | What |
 |---|---|---|
-| Live guidance | `public/scan/live-worker.js` | Runs at ~10 fps on 360 px frames. It models the background color (from the frame border, or from a point you tap), thresholds with Otsu and picks the piece nearest the center. Its output drives the overlay and the guidance text: center the piece, move closer, hold the phone flat (level from the motion sensor), hold steady. |
-| Burst | `public/scan/scanner.js` | Captures 5 full-resolution frames once the piece has been steady for 0.7 s. |
-| Coarse mask | `public/scan/refine-worker.js` | Color thresholding at half resolution. **MobileSAM** (ONNX Runtime Web, WebGPU or WASM) acts as a referee and takes over when the background is too busy for thresholding. In the default *auto* mode, the 45 MB model downloads only when needed. |
-| Sub-pixel edges | `vision.refineContour` | Treats the mask as a trimap. Each boundary pixel is explained against the colors of the nearest sure-piece and sure-background pixels: α = \|I − B\| / \|F − B\|, minus the background's noise level. The contour is the α = 0.5 iso-line (marching squares). |
-| Fusion | `vision.fuseContours` | Drops blurred frames. The frame that agrees most with the others (the medoid) becomes the reference; the rest are aligned to it (similarity ICP) and their anti-aliased coverages averaged before taking the 0.5 iso-line. This suppresses noise and one-off glitches. |
-| Scan card | `vision.detectCard` | Finds the ring and refines its corners by line fitting. A homography maps every frame's contour into millimetres (perspective-corrected) before fusion. |
+| Live view | `public/scan/live-worker.js` | Only finds the card, ~3×/s on a 320 px frame. The camera runs at 15 fps and a motion-sensor level shows tilt. The piece is not segmented live: continuous segmentation overheated phones. |
+| Capture | `public/scan/scanner.js` | Native photos via `ImageCapture.takePhoto()` where available, otherwise the highest-resolution video frames. The camera is switched off while processing and reviewing. |
+| Card | `vision.detectCard` | Ring found in the downscaled photo; corners refined by line fitting; homography to mm. |
+| Coarse mask | `vision.segmentOnCard` | On the blanked card interior, with a **shadow-free distance**: the pixel is written as I = s·B + r against the local card color B. Shadows (s < 1, r ≈ 0) score zero; the piece differs in color (r) or is brighter. MobileSAM is an optional fallback for low contrast. |
+| Edges | `vision.refineOnCard` | At the photo's native resolution around the piece: α = (D(I) − n) / (D(F) − n), using the shadow-free distance D, the nearest piece color F and the card color averaged over the plain card. The 0.5 iso-line is traced with marching squares, then smoothed by 0.08 mm along the outline. |
+| Combine | `refine-worker.js` | Frames of one placement are averaged; turned placements are intersected (a shadow only ever adds area). |
 
-On synthetic bursts (real scanned pieces composited onto textured tables with a soft shadow, a
-cardboard rim, ±3° hand tilt, blur, noise and JPEG compression), the fused contour is within about
-**0.24% of the piece size on average** (p95 ≈ 0.6%), or about 0.05 mm on a 2 cm piece. Run the
-tests yourself with `tools/make_scan_frames.py` and `tools/make_scan_video.py`.
-
-The contour is sent as 1000 points, centered and scaled to sqrt(area) = 1000 units, plus the size
-in mm when the card was used. The server never receives images.
+On the six test photos (`tests/test1`), the new pipeline excludes the shadow crescents the old
+one included: its outlines were 7–9% too large in sqrt(area). Jitter is about 35% lower, and all
+side types (tab / blank) are detected correctly. On synthetic bursts with ground truth, the
+outline error is about 0.25% of piece size.
 
 ## Server
 
@@ -81,8 +78,8 @@ and rolls it out. It needs `CLOUDISH_API_KEY` in `.env`.
 
 - `tools/make_demo_catalog.py`: builds the demo catalog (`public/demo/cats.json`) from a
   [jigsawlutioner-cli](https://github.com/byWulf/jigsawlutioner-cli) sample set.
-- `tools/make_scan_frames.py`: synthetic camera bursts with ground truth, optionally on the scan card.
-- `tools/make_scan_video.py`: a fake-webcam MJPEG video for Chrome's `--use-file-for-fake-video-capture`.
+- `tools/make_scan_frames.py`: synthetic camera bursts with ground truth on the scan card (`TURN=1` also writes a 180°-turned placement).
+- `tools/make_scan_video.py`: a fake-webcam MJPEG video for Chrome's `--use-file-for-fake-video-capture` (`CARD=dark` puts the pieces on the card).
 
 ## Credits
 

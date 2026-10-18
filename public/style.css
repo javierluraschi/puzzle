@@ -220,3 +220,6 @@ body.scanning { overflow: hidden; }
 }
 .card-tip { margin: 1rem 0; }
 .card-tip h3 { margin: 0.6rem 0 0.2rem; font-size: 1rem; }
+.scanner-photo { display: inline-flex; align-items: center; justify-content: center; min-width: 4.2rem; padding: 0.5rem 0.9rem; border-radius: 10px; background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(255, 255, 255, 0.25); color: #fff; cursor: pointer; font-size: 1.1rem; }
+.scanner-bottom { gap: 1.2rem; }
+.scanner-result h3.error { margin-top: 0; }

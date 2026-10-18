@@ -36,17 +36,16 @@
     <section class="how">
       <h2>How it works</h2>
       <ol class="steps">
-        <li><strong>Scan</strong> one piece at a time: place it face up on a plain, contrasting surface and hold the phone flat above it. When the outline turns green and you hold still, the app takes a burst of frames and traces the edges with sub-pixel precision.</li>
+        <li><strong>Scan</strong> one piece at a time on the printed scan card: hold the phone flat above it, and when the card's frame turns green and you hold still the app takes high-resolution photos and traces the edges with sub-pixel precision, ignoring shadows.</li>
         <li><strong>Label</strong>: pieces are numbered 1, 2, 3… automatically (you can change any label). Jot the number on the back of the piece with a pencil, or put it on a numbered sticky note, so you can find it later.</li>
         <li><strong>Match</strong>: open any piece to see the best candidates for each side, or solve the whole catalog into assembled groups.</li>
       </ol>
       <div class="tips">
         <h3>Tips for exact outlines</h3>
         <ul>
-          <li>A dark matte cloth (or white paper for dark pieces) and soft, even light – no strong lamp shadows.</li>
-          <li>Hold the phone flat (the level shows when it is) at a distance where the piece fills about a quarter of the screen.</li>
-          <li>For solving whole puzzles, <a href="/card.html" target="_blank">print a scan card</a>: it gives every piece its true size and removes perspective distortion.</li>
-          <li>Busy table? Turn on <em>AI</em> in the scanner: MobileSAM runs on your phone to find the piece (one-time 45 MB download).</li>
+          <li>Soft, even light. Shadows are detected and ignored, but weaker ones give the best edges.</li>
+          <li>Hold the phone flat (the level shows when it is) so the card fills the view.</li>
+          <li>Scanning uses a <a href="/card.html" target="_blank">printed scan card</a>: it gives every piece its true size and removes perspective distortion.</li>
           <li>Only the outline is stored – no photos leave your phone. Matching uses shapes only, so it works best with grid-cut puzzles with distinct shapes (e.g. Ravensburger).</li>
         </ul>
       </div>
@@ -62,19 +61,20 @@
     </nav>
 
     <section class="tab" id="tab-scan">
+      <div class="tips card-tip">
+        <h3>🖨 First: print the scan card</h3>
+        <p class="muted">Scanning needs the <a href="/card.html" target="_blank">printed scan card</a> (print at 100%). Its black frame tells the scanner the exact size of each piece and corrects the perspective. Use the dark card for light pieces, the light card for dark pieces.</p>
+      </div>
       <div class="scan-start">
         <button class="primary big" id="scan-button">📷 Scan pieces</button>
         <p class="muted">Next label: <strong id="scan-next-label">1</strong> – you can change it in the scanner.</p>
       </div>
-      <div class="tips card-tip">
-        <h3>🖨 For complete solves: use a scan card</h3>
-        <p class="muted">A phone camera does not know how far away the piece is, so without a reference every piece is scaled to the same size – fine for finding neighbours, but the solver assembles more when real sizes are known. <a href="/card.html" target="_blank">Print a scan card</a>, lay each piece in its middle and let the card fill the view: the scanner then also corrects perspective and measures pieces in millimetres.</p>
-      </div>
       <ol class="steps compact">
-        <li>Put one piece face up in the middle of a plain, contrasting surface.</li>
-        <li>Hold the phone flat above it. When the outline turns green, hold still – capture is automatic.</li>
-        <li>Check the result, write the number on the piece, swap in the next one. Scanning continues by itself.</li>
+        <li>Put one piece face up in the middle of the card.</li>
+        <li>Hold the phone flat so the card fills the view. When its frame turns green and you hold still, the photo is taken automatically (or tap ●).</li>
+        <li>Check the outline, write the number on the back of the piece, tap <em>Next piece</em>.</li>
       </ol>
+      <p class="hint">For the sharpest edges: soft light or the 🔦 light (shadows are removed, but less shadow is better), or 🖼 to take the photo with your phone's camera app at full resolution. ↻ 2× takes two photos with the piece turned around in between, which cancels any remaining shadow.</p>
     </section>
 
     <section class="tab" id="tab-catalog" hidden>

@@ -8,3 +8,6 @@ context.tar.gz
 /public/_tb/
 tools/__pycache__/
 /public/_tc/
+/public/_real/
+/public/_old/
+.DS_Store

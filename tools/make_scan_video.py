@@ -8,6 +8,7 @@ Usage: python3 tools/make_scan_video.py <set_dir> <out.mjpeg> <piece numbers> [s
 import io
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -27,17 +28,25 @@ def main():
     meta = json.loads((set_dir / "meta.json").read_text())
     rng = np.random.default_rng(5)
     bg = frames.table(rng, "slate")
+    card = os.environ.get("CARD")  # dark|light: pieces lie on the scan card
+    if card:
+        px_per_mm = frames.OUT[1] * 0.80 / (frames.CARD_OUTER + 2 * frames.CARD_MARGIN)
+        bg = frames.draw_card(bg, (52, 56, 64) if card == "dark" else (238, 238, 232), px_per_mm, 4, (frames.FRAME[0] / 2, frames.FRAME[1] / 2))
     t = 0
     with open(out, "wb") as f:
         for n in numbers:
-            gt_img, color, scale = frames.piece_layers(set_dir, n, meta["threshold"], 360)
+            size = 360
+            if card:
+                scan = Image.open(set_dir / f"piece{n}.jpg").convert("L")
+                size = math.sqrt(frames.largest_component(np.asarray(scan, float) / 255 <= meta["threshold"]).sum()) / frames.SCAN_PX_PER_MM * px_per_mm
+            gt_img, color, scale = frames.piece_layers(set_dir, n, meta["threshold"], size)
             angle = rng.uniform(0, 360)
             for k in range(int(per_piece * FPS)):
                 t += 1 / FPS
                 # slow drift of a hand-held phone: a few pixels and a fraction of a degree
                 center = (frames.FRAME[0] / 2 + 6 * math.sin(t * 1.3), frames.FRAME[1] / 2 + 5 * math.sin(t * 0.9 + 1))
                 tilt = (1.5 * math.sin(t * 0.7), 1.5 * math.sin(t * 0.5 + 2))
-                empty = k < FPS * 1.0  # one second of empty table between pieces
+                empty = k < FPS * 1.0 and not card  # one second of empty table between pieces
                 img = frames.render(bg, None if empty else gt_img, color, scale, angle + 0.3 * math.sin(t), center, tilt, rng)
                 buf = io.BytesIO()
                 img.save(buf, "JPEG", quality=85)

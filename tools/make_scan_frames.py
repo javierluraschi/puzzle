@@ -11,6 +11,7 @@ With card = dark|light the piece lies on a printed scan card (see public/card.ht
 
 import json
 import math
+import os
 import random
 import sys
 from pathlib import Path
@@ -173,7 +174,17 @@ def main():
             name = f"p{n}_f{f}.jpg"
             img.save(out_dir / name, quality=88)
             files.append(name)
-        index.append({"piece": n, "background": kind, "frames": files, "gt": f"p{n}_gt.png", "sizeMm": size_mm})
+        turned = []
+        if os.environ.get("TURN"):
+            # the same piece turned by 180° on the card; the lamp (shadow direction) stays put
+            for f in range(frames):
+                center = (FRAME[0] / 2 + rng.normal(0, 8), FRAME[1] / 2 + rng.normal(0, 8))
+                img = render(bg, gt_img, color, scale, angle + 180 + rng.normal(0, 3), center,
+                             (rng.normal(0, 4), rng.normal(0, 4)), rng)
+                name = f"p{n}_t{f}.jpg"
+                img.save(out_dir / name, quality=88)
+                turned.append(name)
+        index.append({"piece": n, "background": kind, "frames": files, "turned": turned, "gt": f"p{n}_gt.png", "sizeMm": size_mm})
         print("piece", n, kind)
     (out_dir / "index.json").write_text(json.dumps(index))
 

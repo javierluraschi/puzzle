@@ -669,7 +669,7 @@ function rotatePoints(points, angle) {
  * @returns {{points, error, transform: {a, b, tx, ty}}} transformed src points, RMS distance and
  *   the transform p' = [a -b; b a] p + [tx, ty]
  */
-export function alignTo(src, dst, { initialAngles = [0] } = {}) {
+export function alignTo(src, dst, { initialAngles = [0], scale = true } = {}) {
   const target = resampleClosed(dst, 300);
   const grid = new NearestGrid(target, 0.05);
   const sample = resampleClosed(src, 300);
@@ -679,7 +679,7 @@ export function alignTo(src, dst, { initialAngles = [0] } = {}) {
     let pts = applySimilarity(sample, T);
     let error = Infinity;
     for (let iter = 0; iter < 40; iter++) {
-      const step = umeyama(pts, pts.map((p) => grid.nearest(p)));
+      const step = umeyama(pts, pts.map((p) => grid.nearest(p)), scale);
       T = composeSimilarity(step, T);
       pts = applySimilarity(sample, T);
       let e = 0;
@@ -711,8 +711,8 @@ function composeSimilarity(second, first) {
   };
 }
 
-/** Least-squares 2D similarity mapping points p to q (Umeyama). */
-function umeyama(p, q) {
+/** Least-squares 2D similarity (or rigid, without scale) mapping points p to q (Umeyama). */
+function umeyama(p, q, withScale = true) {
   const n = p.length;
   let mx = 0, my = 0, nx = 0, ny = 0;
   for (let i = 0; i < n; i++) { mx += p[i][0]; my += p[i][1]; nx += q[i][0]; ny += q[i][1]; }
@@ -724,8 +724,9 @@ function umeyama(p, q) {
     sb += px * qy - py * qx;
     varP += px * px + py * py;
   }
-  const a = sa / varP;
-  const b = sb / varP;
+  const norm = withScale ? varP : Math.hypot(sa, sb);
+  const a = sa / norm;
+  const b = sb / norm;
   return { a, b, tx: nx - (a * mx - b * my), ty: ny - (b * mx + a * my) };
 }
 
@@ -913,6 +914,141 @@ export function contourDeviation(a, b) {
     s += Math.hypot(p[0] - q[0], p[1] - q[1]);
   }
   return s / pts.length;
+}
+
+// --- shadow-free segmentation on the card ------------------------------------------------------------
+
+/**
+ * How different a color is from the local background, ignoring shadows.
+ *
+ * Writing the pixel as I = s·B + r (s along the background color, r the residual color): a
+ * shadow only darkens the background, i.e. s < 1 and r ≈ 0, so it scores ~0. A piece differs in
+ * color (r) or is brighter (s > 1). On a light card very dark pixels (s < 0.35, deeper than
+ * any soft shadow) also count. For a pixel mixing piece and background with ratio α this is
+ * linear: D(αF + (1-α)B) = α·D(F), which keeps sub-pixel accuracy.
+ */
+function shadowFreeDistance(r, g, b, br, bg, bb) {
+  const bb2 = br * br + bg * bg + bb * bb + 1e-6;
+  const s = (r * br + g * bg + b * bb) / bb2;
+  const rr = r - s * br;
+  const rg = g - s * bg;
+  const rb = b - s * bb;
+  const norm = Math.sqrt(bb2);
+  const brighter = s > 1 ? (s - 1) * norm : 0;
+  const darker = norm > 300 && s < 0.35 ? (0.35 - s) * norm : 0; // light backgrounds only
+  return Math.sqrt(rr * rr + rg * rg + rb * rb + brighter * brighter + darker * darker);
+}
+
+/** Coarse piece mask on the card interior (everything else already blanked by keepInside). */
+export function segmentOnCard(data, w, h) {
+  const B = estimateBackground(data, w, h, null);
+  const D = new Float32Array(w * h);
+  for (let p = 0; p < w * h; p++) {
+    const i = p * 4;
+    const o = p * 3;
+    D[p] = shadowFreeDistance(data[i], data[i + 1], data[i + 2], B[o], B[o + 1], B[o + 2]);
+  }
+  const { threshold, separation } = otsu(D);
+  let mask = new Uint8Array(w * h);
+  for (let i = 0; i < mask.length; i++) mask[i] = D[i] > threshold ? 1 : 0;
+  const r = Math.max(1, Math.round(Math.max(w, h) / 400));
+  mask = close(mask, w, h, r);
+  fillHoles(mask, w, h);
+  mask = open(mask, w, h, r + 1);
+  return { mask, threshold, contrast: separation };
+}
+
+/**
+ * Sub-pixel contour from a coarse prior, shadow-free: alpha = (D(I) - n) / (D(F) - n) with the
+ * shadow-free distance D to the local card color B (averaged over nearby sure-background
+ * pixels: the card is plain) and the piece color F of the nearest sure-piece pixels.
+ */
+export function refineOnCard(data, w, h, prior, band) {
+  const n = w * h;
+  const coarse = new Uint8Array(n);
+  for (let i = 0; i < n; i++) coarse[i] = prior[i] > 0.5 ? 1 : 0;
+  const near = windowCount(coarse, w, h, band);
+  const full = windowSizes(w, h, band);
+  const sureFg = new Float32Array(n);
+  const sureBg = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (near[i] > full[i] - 0.5) sureFg[i] = 1;
+    else if (near[i] < 0.5) sureBg[i] = 1;
+  }
+  const smooth = smoothColors(data, w, h);
+  const F = propagateColors(smooth, sureFg, w, h, band * 2 + 2);
+
+  // background: mean of sure-background pixels in a wide window (paper texture averages out)
+  const R = band * 3;
+  const bgCount = boxSum(sureBg, w, h, R);
+  const Bc = [0, 1, 2].map((k) => {
+    const v = new Float32Array(n);
+    for (let i = 0; i < n; i++) v[i] = smooth[i * 3 + k] * sureBg[i];
+    return boxSum(v, w, h, R);
+  });
+  const bgAt = (i, k) => Bc[k][i] / bgCount[i];
+
+  // noise level: the shadow-free distance of sure-background pixels near the band (90th pct)
+  const samples = [];
+  const nearBand = windowCount(coarse, w, h, band * 3);
+  for (let i = 0; i < n; i += 3) {
+    if (!sureBg[i] || nearBand[i] < 0.5 || bgCount[i] < 1) continue;
+    samples.push(shadowFreeDistance(smooth[i * 3], smooth[i * 3 + 1], smooth[i * 3 + 2], bgAt(i, 0), bgAt(i, 1), bgAt(i, 2)));
+  }
+  samples.sort((a, b) => a - b);
+  const noise = samples.length ? samples[Math.floor(samples.length * 0.9)] : 6;
+
+  const alpha = new Float32Array(n);
+  let contrastSum = 0;
+  let contrastCount = 0;
+  for (let i = 0; i < n; i++) {
+    if (sureFg[i]) { alpha[i] = 1; continue; }
+    if (sureBg[i]) { alpha[i] = 0; continue; }
+    if (!F.known[i] || bgCount[i] < 1) { alpha[i] = prior[i]; continue; }
+    const b0 = bgAt(i, 0);
+    const b1 = bgAt(i, 1);
+    const b2 = bgAt(i, 2);
+    const dI = shadowFreeDistance(smooth[i * 3], smooth[i * 3 + 1], smooth[i * 3 + 2], b0, b1, b2);
+    const dF = shadowFreeDistance(F.color[i * 3], F.color[i * 3 + 1], F.color[i * 3 + 2], b0, b1, b2);
+    const trust = Math.min(1, Math.max(0, (dF - 2 * noise - 6) / 20));
+    const a = dF > noise ? Math.min(1, Math.max(0, (dI - noise) / (dF - noise))) : prior[i];
+    alpha[i] = trust * a + (1 - trust) * prior[i];
+    contrastSum += dF;
+    contrastCount++;
+  }
+
+  const smoothed = boxSum(alpha, w, h, 1);
+  const counts = windowSizes(w, h, 1);
+  for (let i = 0; i < n; i++) smoothed[i] /= counts[i];
+  const loops = isoContours(smoothed, w, h, 0.5);
+  const contour = loops.length ? orient(loops[0]) : null;
+  return {
+    contour,
+    contrast: contrastCount ? contrastSum / contrastCount : 0,
+    noise,
+    sharpness: contour ? edgeSharpness(data, w, h, contour) : 0,
+  };
+}
+
+/** Light Gaussian smoothing along a closed contour (sigma in points), against pixel jitter. */
+export function smoothClosed(poly, sigma) {
+  if (sigma <= 0) return poly;
+  const n = poly.length;
+  const radius = Math.ceil(sigma * 3);
+  const weights = [];
+  for (let k = -radius; k <= radius; k++) weights.push(Math.exp(-(k * k) / (2 * sigma * sigma)));
+  const total = weights.reduce((s, v) => s + v, 0);
+  return poly.map((_, i) => {
+    let x = 0;
+    let y = 0;
+    for (let k = -radius; k <= radius; k++) {
+      const p = poly[(i + k + n) % n];
+      const wgt = weights[k + radius];
+      x += p[0] * wgt;
+      y += p[1] * wgt;
+    }
+    return [x / total, y / total];
+  });
 }
 
 // --- scan card: absolute scale and perspective correction ------------------------------------------
