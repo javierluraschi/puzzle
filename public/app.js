@@ -1,5 +1,5 @@
 import { Scanner } from './scan/scanner.js';
-import { pieceSvg, pairSvg, svgEl, pathData, placement, bodySize, topFor, SIDE_COLORS } from './shapes.js';
+import { pieceSvg, pairSvg, svgEl, pathData, topFor, SIDE_COLORS } from './shapes.js';
 
 const app = document.getElementById('app');
 const dialog = document.getElementById('dialog');
@@ -486,81 +486,88 @@ function renderSolution() {
 
 function renderGroup(group, groupIndex, zoom, showNumbers, showLinks) {
   const rotation = state.groupRotations.get(groupIndex) || 0;
-  const placements = group.placements.map((p) => rotatePlacement(p, rotation)).filter((p) => state.pieces.get(p.piece)?.ok);
+  const placements = group.placements.filter((p) => state.pieces.get(p.piece)?.ok && p.pose);
 
-  // column widths / row heights averaged over their pieces, like jigsawlutioner-cli
-  const widths = new Map();
-  const heights = new Map();
+  // Pieces are drawn where the solver placed them (pose: piece mm -> group mm), so the board shows
+  // the real geometry. A group rotation turns everything by quarter turns.
+  const turn = (rotation * Math.PI) / 2;
+  const [tc, ts] = [Math.cos(turn), Math.sin(turn)];
+  const matrices = new Map();
   for (const p of placements) {
-    const [w, hh] = bodySize(state.pieces.get(p.piece), p.top);
-    widths.set(p.x, [...(widths.get(p.x) || []), w]);
-    heights.set(p.y, [...(heights.get(p.y) || []), hh]);
+    const a = (p.pose.angle * Math.PI) / 180;
+    const [c, s] = [Math.cos(a), Math.sin(a)];
+    // rotation of the group after the pose
+    matrices.set(p.piece, [tc * c - ts * s, ts * c + tc * s, -(tc * s + ts * c), tc * c - ts * s, tc * p.pose.tx - ts * p.pose.ty, ts * p.pose.tx + tc * p.pose.ty]);
   }
-  const offsets = (map) => {
-    const keys = [...map.keys()];
-    const min = Math.min(...keys);
-    const max = Math.max(...keys);
-    const result = new Map();
-    let pos = 0;
-    let last = 20;
-    for (let k = min; k <= max; k++) {
-      const values = map.get(k);
-      const size = values ? values.reduce((a, b) => a + b, 0) / values.length : last;
-      result.set(k, pos + size / 2);
-      pos += size;
-      last = size;
-    }
-    return { result, total: pos, min, max };
-  };
-  const cols = offsets(widths);
-  const rows = offsets(heights);
-  const margin = 8; // mm
-  const W = (cols.total + margin * 2) * zoom;
-  const H = (rows.total + margin * 2) * zoom;
-
-  const board = svgEl('svg', { class: 'board', width: W.toFixed(0), height: H.toFixed(0), viewBox: `0 0 ${W.toFixed(1)} ${H.toFixed(1)}` });
-  const labels = svgEl('g', { class: 'board-labels' });
+  const map = ([a, b, c, d, e, f], [x, y]) => [a * x + c * y + e, b * x + d * y + f];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
   for (const p of placements) {
     const piece = state.pieces.get(p.piece);
-    const x = (cols.result.get(p.x) + margin) * zoom;
-    const y = (rows.result.get(p.y) + margin) * zoom;
-    const g = svgEl('g', { transform: placement(piece, p.top, zoom, x, y), class: 'board-piece' }, svgEl('path', { class: 'piece-fill', d: pathData(piece.outline) }));
+    for (let i = 0; i < piece.outline.length; i += 8) {
+      const [x, y] = map(matrices.get(p.piece), piece.outline[i]);
+      minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+    }
+  }
+  const margin = 3; // mm
+  const W = (maxX - minX + 2 * margin) * zoom;
+  const H = (maxY - minY + 2 * margin) * zoom;
+  const screen = ([x, y]) => [(x - minX + margin) * zoom, (y - minY + margin) * zoom];
+
+  const board = svgEl('svg', { class: 'board', width: W.toFixed(0), height: H.toFixed(0), viewBox: `0 0 ${W.toFixed(1)} ${H.toFixed(1)}` });
+  const content = svgEl('g', { transform: `scale(${zoom}) translate(${(margin - minX).toFixed(3)} ${(margin - minY).toFixed(3)})` });
+  const labels = svgEl('g', { class: 'board-labels' });
+  const centers = new Map();
+  for (const p of placements) {
+    const piece = state.pieces.get(p.piece);
+    const m = matrices.get(p.piece);
+    const g = svgEl('g', { transform: `matrix(${m.map((v) => v.toFixed(5)).join(' ')})`, class: 'board-piece' }, svgEl('path', { class: 'piece-fill', d: pathData(piece.outline), 'vector-effect': 'non-scaling-stroke' }));
     g.addEventListener('click', () => showPieceDetails(p.piece));
-    board.append(g);
+    content.append(g);
+    centers.set(`${p.x},${p.y}`, screen(map(m, piece.center)));
     if (showNumbers) {
+      const [x, y] = screen(map(m, piece.center));
       labels.append(svgEl('text', { x: x.toFixed(1), y: y.toFixed(1), class: 'piece-label', 'font-size': Math.max(7, Math.min(16, 4.7 * zoom)).toFixed(1) }, document.createTextNode(piece.label)));
     }
-    if (showLinks) {
-      p.links.forEach((probability, direction) => {
-        if (probability === null || probability === undefined) return;
-        // directions 0 up, 1 right, 2 down, 3 left; rotating the group turns them along
-        const d = (direction + rotation) % 4;
-        const [dx, dy] = [[0, -0.5], [0.5, 0], [0, 0.5], [-0.5, 0]][d];
-        const [w, hh] = bodySize(piece, p.top);
-        const lx = x + dx * w * zoom;
-        const ly = y + dy * hh * zoom;
+  }
+  if (showLinks) {
+    // fit quality on each seam, halfway between the two pieces (directions 0 up, 1 right, 2 down, 3 left)
+    const D = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    for (const p of placements) {
+      p.links.forEach((probability, dir) => {
+        if (probability === null || probability === undefined || dir > 1) return; // each seam once
+        const a = centers.get(`${p.x},${p.y}`);
+        const b = centers.get(`${p.x + D[dir][0]},${p.y + D[dir][1]}`);
+        if (!a || !b) return;
+        const [lx, ly] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
         const hue = Math.round(probability * 120);
         labels.append(svgEl('rect', { x: (lx - 14).toFixed(1), y: (ly - 7).toFixed(1), width: 28, height: 14, rx: 3, fill: `hsla(${hue},80%,35%,0.9)` }));
         labels.append(svgEl('text', { x: lx.toFixed(1), y: (ly + 0.5).toFixed(1), class: 'link-label' }, document.createTextNode(percent(probability))));
       });
     }
   }
-  board.append(labels);
+  board.append(content, labels);
 
+  // grid of labels (rows / columns as the solver arranged them), turned with the group
+  const cells = placements.map((p) => rotatePlacement(p, rotation));
+  const xs = cells.map((p) => p.x);
+  const ys = cells.map((p) => p.y);
   const grid = [];
-  for (let y = rows.min; y <= rows.max; y++) {
-    const cells = [];
-    for (let x = cols.min; x <= cols.max; x++) {
-      const p = placements.find((pl) => pl.x === x && pl.y === y);
-      cells.push(p ? labelOf(p.piece) : '·');
+  for (let y = Math.min(...ys); y <= Math.max(...ys); y++) {
+    const row = [];
+    for (let x = Math.min(...xs); x <= Math.max(...xs); x++) {
+      const p = cells.find((c) => c.x === x && c.y === y);
+      row.push(p ? labelOf(p.piece) : '·');
     }
-    grid.push(cells);
+    grid.push(row);
   }
 
   return h('div', { class: 'group' },
     h('div', { class: 'group-head' },
       h('h3', {}, groupIndex === 0 ? 'Biggest group' : `Group ${groupIndex + 1}`),
-      h('span', { class: 'muted' }, `${placements.length} pieces · ${cols.max - cols.min + 1}×${rows.max - rows.min + 1}`),
+      h('span', { class: 'muted' }, `${placements.length} pieces · ${grid[0].length}×${grid.length}`),
       h('span', { class: 'spacer' }),
       h('button', { title: 'Rotate', onclick: () => { state.groupRotations.set(groupIndex, (rotation + 1) % 4); renderSolution(); } }, '⟳ rotate'),
       h('button', { onclick: () => openDialog('Layout grid', h('p', { class: 'hint' }, 'Piece labels by row, as shown in the group.'), h('table', { class: 'layout-grid' }, grid.map((r) => h('tr', {}, r.map((c) => h('td', {}, c)))))) }, '▦ grid'),

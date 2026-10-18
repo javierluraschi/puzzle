@@ -10,7 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { analyzePiece } from './piece.js';
 
-export const ANALYSIS_VERSION = 2;
+export const ANALYSIS_VERSION = 3; // 3: side frames for spatial solving
 export const PUZZLE_TTL_DAYS = 60;
 const DEFAULT_SIZE_MM = 15;
 

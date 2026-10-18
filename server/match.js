@@ -10,6 +10,7 @@
 // over the middle of the side, plus a penalty for an offset far from the puzzle's typical one.
 
 import { SIDE_SAMPLES } from './piece.js';
+import { compose, invert, fit, sideFrame } from './rigid.js';
 
 const TRIM = Number(globalThis.process?.env?.MATCH_TRIM ?? 0.08);
 const INNER_FROM = Math.round(SIDE_SAMPLES * TRIM);
@@ -51,11 +52,11 @@ export function quickScore(a, b) {
  * Nearest point to p on A's polyline near index `hint`, with the signed distance: positive when p
  * lies outside A's piece (on the neighbour's side, -y in A's frame) – i.e. a gap.
  */
-function nearestOnA(points, p, hint) {
+export function nearestOnA(points, p, hint, window = 10) {
   let best = Infinity;
   let res = null;
-  const from = Math.max(0, hint - 10);
-  const to = Math.min(points.length - 1, hint + 10);
+  const from = Math.max(0, hint - window);
+  const to = Math.min(points.length - 1, hint + window);
   for (let k = from; k < to; k++) {
     const [x1, y1] = points[k];
     const [x2, y2] = points[k + 1];
@@ -80,10 +81,12 @@ function nearestOnA(points, p, hint) {
 
 /**
  * Rigid ICP of the mated B onto A allowing a uniform offset along A's normal.
- * @returns {{ residual: number, offset: number }} residual RMS (mm) and the fitted offset (mm)
+ * @returns {{ residual: number, offset: number, pose }} residual RMS (mm), the fitted offset (mm)
+ *   and (when the sides carry frames) the pose of B's piece in A's piece coordinates
  */
 export function sideFit(a, b) {
-  let m = mate(a, b);
+  const start = mate(a, b);
+  let m = start;
   let offset = 0;
   let residual = Infinity;
   for (let iter = 0; iter < 10; iter++) {
@@ -114,7 +117,17 @@ export function sideFit(a, b) {
     const sin = sb / norm;
     m = m.map(([x, y]) => [cos * (x - mx) - sin * (y - my) + nx, sin * (x - mx) + cos * (y - my) + ny]);
   }
-  return { residual, offset };
+  return { residual, offset, pose: a.origin ? relativePose(a, b, start, m) : null };
+}
+
+/**
+ * Pose of piece B in piece A's coordinates: B's piece -> B's side frame -> mated onto A's side
+ * frame (a half turn about the chord's middle) -> the ICP refinement -> A's piece coordinates.
+ */
+function relativePose(a, b, start, final) {
+  const mateMotion = { c: -1, s: 0, tx: b.length + (a.length - b.length) / 2, ty: 0 };
+  const icp = fit(start, final);
+  return compose(invert(sideFrame(a)), compose(icp, compose(mateMotion, sideFrame(b))));
 }
 
 /** Combined score (mm, lower is better) given the puzzle's typical gap. */
@@ -238,3 +251,6 @@ export function candidatesFor(pieces, index, { typicalOffset = null, keep = 8, r
     .sort((x, y) => x.score - y.score)
     .slice(0, keep));
 }
+
+/** Middle range of side samples used for comparisons. */
+export const INNER = [INNER_FROM, INNER_TO];

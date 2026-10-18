@@ -111,7 +111,8 @@ export function analyzePiece(contour) {
     directions,
     rotations,
     kind: flat >= 2 ? 'corner' : flat === 1 ? 'edge' : 'inner',
-    sides: sides.map((s) => ({ type: s.type, length: round(s.length, 4), depth: round(s.depth, 4), points: s.points.map(([x, y]) => [round(x, 4), round(y, 4)]) })),
+    // per side: its frame in piece coordinates (start corner + chord angle) and its curve in that frame
+    sides: sides.map((s) => ({ type: s.type, length: round(s.length, 4), depth: round(s.depth, 4), origin: s.origin.map((v) => round(v, 4)), angle: round(s.angle, 6), points: s.points.map(([x, y]) => [round(x, 4), round(y, 4)]) })),
   };
 }
 
@@ -227,7 +228,7 @@ function describeSide(path) {
   let extreme = 0;
   for (const [, y] of local) if (Math.abs(y) > Math.abs(extreme)) extreme = y;
   const type = Math.abs(extreme) < length * 0.1 ? 'flat' : extreme < 0 ? 'out' : 'in';
-  return { type, length, depth: extreme, points };
+  return { type, length, depth: extreme, points, origin: p, angle: Math.atan2(uy, ux) };
 }
 
 function round(v, digits) {
