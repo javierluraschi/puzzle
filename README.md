@@ -93,6 +93,7 @@ and rolls it out. It needs `CLOUDISH_API_KEY` in `.env`.
 - `tools/make_demo_catalog.py`: builds the demo catalog (`public/demo/cats.json`) from a
   [jigsawlutioner-cli](https://github.com/byWulf/jigsawlutioner-cli) sample set.
 - `tools/make_scan_frames.py`: synthetic camera bursts with ground truth on the scan card (`TURN=1` also writes a 180°-turned placement).
+- `tools/make_social_card.mjs`: renders the 1200×630 link preview (`public/social-card.png`) from the landing page's art, with Playwright and Chrome against a running server. Re-run it when the headline or art changes.
 - `tools/make_scan_video.py`: a fake-webcam MJPEG video for Chrome's `--use-file-for-fake-video-capture` (`CARD=dark` puts the pieces on the card).
 
 ## Credits

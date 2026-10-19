@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /p/
+Disallow: /api/
+Disallow: /auth/
+
+Sitemap: https://puzzle.cloudish.app/sitemap.xml

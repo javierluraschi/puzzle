@@ -2,6 +2,7 @@ import { Scanner } from './scan/scanner.js';
 import { pieceSvg, pairSvg, svgEl, pathData, topFor, SIDE_COLORS } from './shapes.js';
 
 const app = document.getElementById('app');
+const home = document.getElementById('home');
 const dialog = document.getElementById('dialog');
 const SIDE_NAMES = { flat: 'flat edge', out: 'tab', in: 'blank', unknown: 'side' };
 
@@ -73,11 +74,13 @@ async function loadAccount() {
   renderAccount();
 }
 
-function signInHref() {
-  return '/auth/login?return=' + encodeURIComponent(location.pathname);
+function signInHref(ret = location.pathname) {
+  return '/auth/login?return=' + encodeURIComponent(ret);
 }
 
 function renderAccount() {
+  document.body.classList.toggle('signed-in', Boolean(me.user));
+  document.getElementById('member-name').textContent = me.user ? `, ${me.user.name.split(' ')[0]}` : '';
   const slot = document.getElementById('account');
   if (!me.user) {
     slot.replaceChildren(h('a', { class: 'button', href: signInHref() }, 'Sign in'));
@@ -107,13 +110,14 @@ async function saveToAccount(ids) {
 
 function navigate(path) {
   history.pushState({}, '', path);
+  window.scrollTo(0, 0);
   route();
 }
 
 window.addEventListener('popstate', route);
 document.addEventListener('click', (event) => {
   const link = event.target.closest('a[data-link]');
-  if (link) {
+  if (link && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
     event.preventDefault();
     navigate(link.getAttribute('href'));
   }
@@ -124,35 +128,74 @@ document.addEventListener('click', (event) => {
 async function route() {
   const match = location.pathname.match(/^\/p\/([a-z0-9]{10})/);
   document.getElementById('puzzle-title').textContent = '';
+  document.documentElement.classList.toggle('on-puzzle', Boolean(match));
+  home.hidden = Boolean(match);
+  app.hidden = !match;
   if (match) {
     await showPuzzle(match[1]);
   } else {
     state = null;
+    app.replaceChildren();
     showHome();
   }
 }
 
-function showHome() {
-  app.replaceChildren(document.getElementById('home-template').content.cloneNode(true));
-  document.getElementById('start-form').addEventListener('submit', async (event) => {
+// --- landing page ------------------------------------------------------------------------------
+
+async function createPuzzle(name, { demo = false } = {}) {
+  const puzzle = await api('/puzzles', { method: 'POST', json: { name } });
+  if (demo) sessionStorage.setItem('demo-' + puzzle.id, '1');
+  if (me.user) await loadAccount(); // new puzzles are saved to the account
+  navigate('/p/' + puzzle.id);
+}
+
+function focusStart() {
+  const input = document.querySelector('#start-form input');
+  input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  input.focus({ preventScroll: true });
+}
+
+let homeReady = false;
+function setUpHome() {
+  homeReady = true;
+  document.getElementById('start-form').addEventListener('submit', (event) => {
     event.preventDefault();
-    const name = new FormData(event.target).get('name');
-    const puzzle = await api('/puzzles', { method: 'POST', json: { name } });
-    if (me.user) await loadAccount(); // new puzzles are saved to the account
-    navigate('/p/' + puzzle.id);
+    createPuzzle(new FormData(event.target).get('name'));
   });
-  document.getElementById('demo-button').addEventListener('click', async (event) => {
-    event.target.disabled = true;
-    const puzzle = await api('/puzzles', { method: 'POST', json: { name: 'Demo: cats (54 pieces)' } });
-    sessionStorage.setItem('demo-' + puzzle.id, '1');
-    if (me.user) await loadAccount();
-    navigate('/p/' + puzzle.id);
-  });
-  const error = new URLSearchParams(location.search).get('signin_error');
-  if (error) {
-    history.replaceState({}, '', '/');
-    app.querySelector('.hero').append(h('p', { class: 'error' }, error));
+  const actions = {
+    demo: () => createPuzzle('Demo: cats (54 pieces)', { demo: true }),
+    'start-local': () => createPuzzle(''),
+    'focus-start': focusStart,
+  };
+  for (const button of home.querySelectorAll('[data-action]')) {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await actions[button.dataset.action]();
+      } catch (error) {
+        showHomeError(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    });
   }
+}
+
+function showHomeError(message) {
+  const slot = document.getElementById('home-error');
+  slot.textContent = message;
+  slot.hidden = false;
+}
+
+function showHome() {
+  if (!homeReady) setUpHome();
+  // after signing in from a call to action, land on the form that starts a puzzle
+  for (const link of home.querySelectorAll('[data-signin]')) link.href = signInHref('/?start=1');
+  const params = new URLSearchParams(location.search);
+  const error = params.get('signin_error');
+  if (error) showHomeError(error);
+  if (params.has('signin_error') || params.has('start')) history.replaceState({}, '', '/' + location.hash);
+  if (params.has('start') && me.user) focusStart();
   renderRecent();
 }
 
@@ -163,8 +206,8 @@ function renderRecent() {
     ...me.puzzles.map((p) => ({ id: p.id, name: p.name, time: p.updated * 1000, note: `${p.pieces} pieces` })),
     ...local.filter((p) => !inAccount(p.id)).map((p) => ({ id: p.id, name: p.name, time: p.time, note: me.user ? 'not in your account yet' : null })),
   ];
+  document.getElementById('recent').hidden = rows.length === 0;
   if (!rows.length) return;
-  document.getElementById('recent').hidden = false;
   document.getElementById('recent-list').replaceChildren(...rows.map((p) => h('li', {},
     h('a', { href: '/p/' + p.id, 'data-link': true }, p.name || p.id),
     h('span', { class: 'muted' }, ' · ' + new Date(p.time).toLocaleDateString()),
