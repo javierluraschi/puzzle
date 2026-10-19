@@ -6,7 +6,7 @@
 // `top` facing up, side top+1 faces right, top+2 down and top+3 left. Zoom is in pixels per mm.
 
 const NS = 'http://www.w3.org/2000/svg';
-export const SIDE_COLORS = { flat: '#8a93a6', out: '#ffb020', in: '#4fa3ff', unknown: '#c06cff' };
+export const SIDE_COLORS = { flat: '#8f97a6', out: '#e89300', in: '#2f6fde', unknown: '#9b51e0' };
 
 export function svgEl(tag, attrs = {}, ...children) {
   const el = document.createElementNS(NS, tag);
@@ -85,7 +85,7 @@ export function pieceSvg(piece, { top = 0, zoom = 3, highlight = null, sides = f
   if (sides || highlight !== null) {
     sidePolylines(piece).forEach((pts, k) => {
       if (!sides && k !== highlight) return;
-      const color = k === highlight ? '#ffd400' : SIDE_COLORS[piece.directions[k]] || SIDE_COLORS.unknown;
+      const color = k === highlight ? '#d6336c' : SIDE_COLORS[piece.directions[k]] || SIDE_COLORS.unknown;
       g.append(svgEl('polyline', {
         points: pts.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(' '),
         fill: 'none', stroke: color, 'stroke-width': k === highlight ? 5 : 3.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke',

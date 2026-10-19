@@ -13,27 +13,29 @@ const out = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'publi
 const card = `
 <style>
   body { margin: 0; }
-  .og { position: relative; width: 1200px; height: 630px; overflow: hidden; display: grid; grid-template-columns: 560px 1fr; align-items: center;
-        padding: 0 40px 0 72px; box-sizing: border-box; background:
-        radial-gradient(700px 420px at 88% 20%, rgba(255, 128, 64, 0.22), transparent 65%),
-        radial-gradient(600px 400px at 0% 100%, rgba(79, 163, 255, 0.14), transparent 60%), #14161b; }
-  .og-brand { display: flex; align-items: center; gap: 14px; font-size: 30px; font-weight: 700; }
-  .og h1 { font-size: 62px; line-height: 1.04; letter-spacing: -0.03em; font-weight: 800; margin: 34px 0 26px; }
-  .og p { color: var(--muted); font-size: 26px; line-height: 1.4; margin: 0 0 34px; }
-  .og-url { display: inline-block; font-size: 22px; font-weight: 600; color: var(--accent); border: 2px solid rgba(255, 176, 32, 0.5); border-radius: 999px; padding: 8px 22px; }
-  .og svg { width: 640px; height: auto; margin-left: -40px; overflow: visible; }
-  .og .hp { animation: none !important; }
-  .og .hp-label { display: none; }
-  .og .hp-last { transform: translate(46px, -40px) rotate(12deg) !important; filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.55)); }
+  .og { position: relative; width: 1200px; height: 630px; overflow: hidden; display: grid; grid-template-columns: 600px 1fr; align-items: center;
+        padding: 0 30px 0 76px; box-sizing: border-box; background-color: var(--bg);
+        background-image: linear-gradient(rgba(31, 27, 22, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(31, 27, 22, 0.05) 1px, transparent 1px);
+        background-size: 36px 36px; }
+  .og-brand { display: flex; align-items: center; gap: 14px; font: 650 32px var(--font-display); letter-spacing: -0.01em; }
+  .og h1 { font-family: var(--font-display); font-size: 70px; line-height: 0.98; letter-spacing: -0.035em; font-weight: 600; margin: 36px 0 26px; }
+  .og p { color: var(--muted); font-size: 25px; line-height: 1.4; margin: 0 0 32px; max-width: 500px; }
+  .og-url { display: inline-block; font: 600 21px var(--font-mono); color: var(--accent-ink); background: #fff; border: 2px solid var(--line-strong); border-radius: 999px; padding: 8px 22px; }
+  .og .swoosh path { animation: none; stroke-dashoffset: 0; }
+  .og .hero-stage { width: 600px; margin-left: -20px; }
+  .og .hp, .og .hp-tag, .og .hp-lift, .og .hero-ring { animation: none !important; }
+  .og .hp-tag, .og .hero-ring, .og .hp-lift { opacity: 0; }
+  .og .hp-last { transform: translate(58px, -70px) rotate(14deg); }
+  .og .hp-last .hp-lift { opacity: 1; }
 </style>
 <div class="og">
   <div>
-    <div class="og-brand"><img src="/favicon.svg" width="48" height="48" alt=""> Jigsaw Scanner</div>
-    <h1>That piece fits somewhere.<br><span class="accent-text">Your phone knows where.</span></h1>
+    <div class="og-brand"><img src="/favicon.svg" width="48" height="48" alt=""> Puzzle Solver</div>
+    <h1>That piece fits somewhere. <span class="h1-turn">Your phone knows <em class="swoosh">where<svg viewBox="0 0 200 24" preserveAspectRatio="none"><path d="M4 16C52 6 128 4 196 11" pathLength="1"/></svg></em>.</span></h1>
     <p>Print the scan card, scan your pieces one by one, and see exactly which ones fit together.</p>
     <span class="og-url">puzzle.cloudish.app</span>
   </div>
-  <svg data-art="hero" viewBox="0 0 640 480"></svg>
+  <div class="hero-stage" data-art="hero"></div>
 </div>`;
 
 const browser = await chromium.launch({ channel: 'chrome' });
@@ -41,7 +43,9 @@ const page = await browser.newPage({ viewport: { width: 1200, height: 630 } });
 await page.goto(base + '/', { waitUntil: 'networkidle' });
 await page.evaluate((html) => { document.body.innerHTML = html; }, card);
 await page.addScriptTag({ url: '/landing.js?card', type: 'module' }); // a fresh URL, so the module runs again
-await page.waitForTimeout(500);
+await page.waitForSelector('.og .hp-last', { timeout: 30000 }); // the art is drawn once its data loads
+await page.evaluate(() => document.fonts.ready);
+await page.waitForTimeout(800);
 await page.locator('.og').screenshot({ path: out });
 await browser.close();
 console.log('wrote', out);

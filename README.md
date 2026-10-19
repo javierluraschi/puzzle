@@ -1,6 +1,8 @@
-# Jigsaw Scanner
+# Puzzle Solver
 
-Live at **https://puzzle.cloudish.app/**
+A jigsaw puzzle solver for your phone. Live at **https://puzzle.cloudish.app/**
+
+[![Puzzle Solver: that piece fits somewhere, your phone knows where](public/social-card.png)](https://puzzle.cloudish.app/)
 
 Scan jigsaw pieces one at a time with a phone camera on a printed scan card. The app traces each
 piece's exact outline on the device and stores only that 2D contour plus a label. The Node server
@@ -22,6 +24,12 @@ jigsawlutioner's results served as the reference to validate the new corner find
    Labels count up from 1, and you can edit them.
 3. **Review**, write the number on the back of the piece, then tap *Next piece*.
 4. **Match / solve.** Open a piece to see what fits each side, or solve the whole catalog.
+
+![The solve tab on the 54-piece demo: one group with every piece in its place](docs/solve.png)
+
+The demo on the start page (54 real pieces, traced from flatbed scans) solves into a single group in
+a few seconds, as above. It's the bottom-right corner of a larger puzzle, and two of its pieces are
+missing from the set.
 
 The light (torch / flash) is switched on automatically where the browser allows it. The scanner
 waits for the phone to be flat (within 3°) and for the card to fill the view, and explains what is
@@ -77,6 +85,20 @@ GET    /api/puzzles/:id/solution                                                
 GET    /api/puzzles/:id/export                                                   -> labels + contours (JSON)
 ```
 
+## Landing page
+
+The start page (`public/index.html`, styles in `public/style.css`) is static HTML, so search engines
+and link previews can read it. `public/app.js` hides it on puzzle pages and swaps its calls to
+action once the account is known. Headings use [Fraunces](https://github.com/undercasetype/Fraunces)
+(OFL, self-hosted in `public/fonts/`).
+
+Its illustrations (`public/landing.js`) are drawn from real data rather than mock-ups:
+`public/demo/landing.json` is the 54-piece demo as this app analyzed and solved it, with outlines in
+millimetres where the solver placed them. The picture on the pieces is `public/scene.svg`. The hero
+assembles the solved board from a pile, and the step illustrations follow one piece (42) with its real
+neighbours and match confidences. The hero pieces are HTML layers clipped to their outlines, so the
+animation moves cached layers instead of repainting the picture every frame.
+
 ## Running locally
 
 ```bash
@@ -93,6 +115,7 @@ and rolls it out. It needs `CLOUDISH_API_KEY` in `.env`.
 - `tools/make_demo_catalog.py`: builds the demo catalog (`public/demo/cats.json`) from a
   [jigsawlutioner-cli](https://github.com/byWulf/jigsawlutioner-cli) sample set.
 - `tools/make_scan_frames.py`: synthetic camera bursts with ground truth on the scan card (`TURN=1` also writes a 180°-turned placement).
+- `tools/make_landing_data.mjs`: imports the demo into a running server, solves it and writes `public/demo/landing.json` for the landing page's illustrations.
 - `tools/make_social_card.mjs`: renders the 1200×630 link preview (`public/social-card.png`) from the landing page's art, with Playwright and Chrome against a running server. Re-run it when the headline or art changes.
 - `tools/make_scan_video.py`: a fake-webcam MJPEG video for Chrome's `--use-file-for-fake-video-capture` (`CARD=dark` puts the pieces on the card).
 
@@ -101,3 +124,5 @@ and rolls it out. It needs `CLOUDISH_API_KEY` in `.env`.
 [jigsawlutioner](https://github.com/byWulf/jigsawlutioner) and
 [jigsawlutioner-cli](https://github.com/byWulf/jigsawlutioner-cli) by Michael Wolf (MIT): the
 original analysis/solver, the reference results used for validation, and the demo pieces.
+[Fraunces](https://github.com/undercasetype/Fraunces) by the Fraunces Project Authors (OFL) for
+headings. Hosted on [Cloudish](https://cloudish.ai).

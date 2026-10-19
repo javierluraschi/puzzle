@@ -3,60 +3,67 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Jigsaw Scanner – find where every puzzle piece goes</title>
-  <meta name="description" content="Scan your jigsaw pieces one at a time on a printed card. Jigsaw Scanner traces every outline on your phone, measures all four sides and works out which pieces fit together.">
+  <title>Puzzle Solver – scan your jigsaw pieces, see where they go</title>
+  <meta name="description" content="Puzzle Solver is a jigsaw puzzle solver for your phone. Scan your pieces one at a time on a printed card; it traces every outline, measures all four sides and works out which pieces fit together.">
   <link rel="canonical" href="https://puzzle.cloudish.app/">
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Jigsaw Scanner">
+  <meta property="og:site_name" content="Puzzle Solver">
   <meta property="og:url" content="https://puzzle.cloudish.app/">
-  <meta property="og:title" content="Jigsaw Scanner – find where every puzzle piece goes">
+  <meta property="og:title" content="Puzzle Solver – scan your jigsaw pieces, see where they go">
   <meta property="og:description" content="Print the scan card, scan your pieces one by one, and let your phone work out exactly which ones fit together.">
   <meta property="og:image" content="https://puzzle.cloudish.app/social-card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Jigsaw Scanner: That piece fits somewhere. Your phone knows where.">
+  <meta property="og:image:alt" content="Puzzle Solver: That piece fits somewhere. Your phone knows where.">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Jigsaw Scanner – find where every puzzle piece goes">
+  <meta name="twitter:title" content="Puzzle Solver – scan your jigsaw pieces, see where they go">
   <meta name="twitter:description" content="Print the scan card, scan your pieces one by one, and let your phone work out exactly which ones fit together.">
   <meta name="twitter:image" content="https://puzzle.cloudish.app/social-card.png">
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Jigsaw Scanner","url":"https://puzzle.cloudish.app/","applicationCategory":"GameApplication","operatingSystem":"Any (web browser)","description":"Scan jigsaw pieces one at a time on a printed card; the app traces every outline on your phone and works out which pieces fit together."}</script>
-  <meta name="theme-color" content="#14161b">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Puzzle Solver","url":"https://puzzle.cloudish.app/","applicationCategory":"GameApplication","operatingSystem":"Any (web browser)","codeRepository":"https://github.com/javierluraschi/puzzle","description":"A jigsaw puzzle solver: scan pieces one at a time on a printed card; the app traces every outline on your phone and works out which pieces fit together."}</script>
+  <meta name="theme-color" content="#f8f4ec">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/style.css">
   <script>if (/^\/p\//.test(location.pathname)) document.documentElement.classList.add('on-puzzle');</script>
 </head>
 <body>
   <header class="topbar">
-    <a href="/" class="brand" data-link><img src="/favicon.svg" alt="" width="28" height="28"> Jigsaw Scanner</a>
+    <a href="/" class="brand" data-link><img src="/favicon.svg" alt="" width="28" height="28"> Puzzle Solver</a>
     <nav class="topnav">
       <a href="/#how">How it works</a>
       <a href="/#expect">What to expect</a>
       <a href="/#faq">FAQ</a>
     </nav>
     <span class="puzzle-title" id="puzzle-title"></span>
-    <span class="account" id="account"></span>
+    <span class="account">
+      <a class="gh-button" href="https://github.com/javierluraschi/puzzle" target="_blank" rel="noopener" aria-label="Star Puzzle Solver on GitHub">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>★ Star</span>
+      </a>
+      <span class="account-slot" id="account"></span>
+    </span>
   </header>
 
   <main id="home" class="landing">
     <section class="hero-band">
       <div class="wrap hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow">For the puzzle that's beating you</p>
-          <h1>That piece fits somewhere.<br><span class="accent-text">Your phone knows where.</span></h1>
-          <p class="lead">Scan your pieces one at a time on a printed card. Jigsaw Scanner traces each outline to a fraction of a millimetre, reads all four sides, and works out which pieces lock together, even in a sky that's all the same blue.</p>
+          <p class="eyebrow">A jigsaw puzzle solver for your phone</p>
+          <h1>That piece fits somewhere. <span class="h1-turn">Your phone knows <em class="swoosh">where<svg viewBox="0 0 200 24" preserveAspectRatio="none" aria-hidden="true"><path d="M4 16C52 6 128 4 196 11" pathLength="1"/></svg></em>.</span></h1>
+          <p class="lead">Scan your pieces one at a time on a printed card. Puzzle Solver traces each outline to a fraction of a millimetre, reads all four sides, and works out which pieces lock together, even in a sky that's all the same blue.</p>
 
           <div class="cta for-guest">
             <div class="cta-row">
               <a class="button primary big" data-signin href="/auth/login">Sign in to start a puzzle</a>
               <button class="big" data-action="demo">Try the demo: 54 real pieces</button>
             </div>
-            <p class="cta-note">No app to install. Your photos never leave your phone. <button class="link-button" data-action="start-local">Or start without an account</button> (it stays in this browser only).</p>
+            <p class="cta-note">No app to install. Your photos never leave your phone. Open source on <a href="https://github.com/javierluraschi/puzzle" target="_blank" rel="noopener">GitHub</a>. <button class="link-button" data-action="start-local">Or start without an account</button> (it stays in this browser only).</p>
           </div>
 
           <div class="cta for-member">
             <p class="welcome">Welcome back<span id="member-name"></span>. What are we solving today?</p>
             <form class="start-form" id="start-form">
-              <input name="name" placeholder="Puzzle name, e.g. Paris at night" maxlength="80" autocomplete="off" aria-label="Puzzle name">
+              <input name="name" placeholder="Puzzle name, e.g. Balloons over Provence" maxlength="80" autocomplete="off" aria-label="Puzzle name">
               <button class="primary" type="submit">Start a puzzle</button>
             </form>
             <button class="link-button" data-action="demo">or open a demo catalog of 54 real pieces →</button>
@@ -64,7 +71,7 @@
           <p class="error" id="home-error" hidden></p>
         </div>
         <figure class="hero-art">
-          <svg data-art="hero" viewBox="0 0 640 480" role="img" aria-label="Numbered puzzle pieces moving from a pile into a finished sunset picture"></svg>
+          <div class="hero-stage" data-art="hero" role="img" aria-label="Fifty-four numbered puzzle pieces moving from a pile into their solved places, forming a picture of hot-air balloons over the countryside"></div>
         </figure>
       </div>
     </section>
@@ -76,20 +83,20 @@
     </section>
 
     <section class="wrap strip" aria-label="At a glance">
-      <div><strong>1 card</strong><span>printed once, used for every piece</span></div>
-      <div><strong>1 piece</strong><span>at a time, numbered as you go</span></div>
-      <div><strong>Sub-mm</strong><span>outlines, traced on your phone</span></div>
-      <div><strong>0 photos</strong><span>uploaded: only the outline is saved</span></div>
+      <div><strong>1</strong><span>printed card, used for every piece</span></div>
+      <div><strong>1</strong><span>piece at a time, numbered as you go</span></div>
+      <div><strong>&lt;1<small>mm</small></strong><span>outline detail, traced on your phone</span></div>
+      <div><strong>0</strong><span>photos uploaded: only the outline is saved</span></div>
     </section>
 
     <section class="wrap how" id="how">
       <p class="eyebrow">How it works</p>
-      <h2 class="section-title">Four steps, from pile to picture</h2>
+      <h2 class="section-title">Four steps, from <em>pile</em> to <em>picture</em></h2>
       <p class="section-lead">No dumping the box on a scanner, no magic photo of the whole pile. You scan each piece on its own, so the app can measure it properly. It sounds slow, but it's what makes the matches trustworthy.</p>
 
       <article class="step">
         <div class="step-copy">
-          <span class="step-num">1</span>
+          <span class="step-num">01</span>
           <h3>Print the scan card</h3>
           <p>Before your first scan, print our <a href="/card.html" target="_blank">scan card page</a>. It's one sheet with four 70 mm cards, each with a thick black frame. That frame is the scanner's ruler: it tells the app exactly how big each piece is and straightens out the camera angle, so every outline comes out true to size.</p>
           <ul class="checks">
@@ -100,29 +107,13 @@
           <a class="button" href="/card.html" target="_blank">🖨 Open the printable card</a>
         </div>
         <figure class="step-art">
-          <svg viewBox="0 0 300 300" role="img" aria-label="A printed sheet with four scan cards, two dark and two light">
-            <rect x="52" y="18" width="196" height="264" rx="6" class="paper"/>
-            <g transform="translate(70 40)">
-              <rect width="74" height="74" fill="#000"/><rect x="6" y="6" width="62" height="62" fill="#fff"/><rect x="8" y="8" width="58" height="58" fill="#3b3f47"/>
-            </g>
-            <g transform="translate(156 40)">
-              <rect width="74" height="74" fill="#000"/><rect x="6" y="6" width="62" height="62" fill="#fff"/><rect x="8" y="8" width="58" height="58" fill="#3b3f47"/>
-            </g>
-            <g transform="translate(70 128)">
-              <rect width="74" height="74" fill="#000"/><rect x="6" y="6" width="62" height="62" fill="#fff"/>
-            </g>
-            <g transform="translate(156 128)">
-              <rect width="74" height="74" fill="#000"/><rect x="6" y="6" width="62" height="62" fill="#fff"/>
-            </g>
-            <text x="78" y="232" class="paper-text">Print check: 50 mm</text>
-            <rect x="78" y="242" width="110" height="2" fill="#111"/><rect x="78" y="237" width="1.5" height="12" fill="#111"/><rect x="186.5" y="237" width="1.5" height="12" fill="#111"/>
-          </svg>
+          <svg data-art="print" viewBox="0 0 320 310" role="img" aria-label="A printed sheet of scan cards, two dark and two light, with puzzle pieces on them"></svg>
         </figure>
       </article>
 
       <article class="step">
         <div class="step-copy">
-          <span class="step-num">2</span>
+          <span class="step-num">02</span>
           <h3>Scan one piece at a time</h3>
           <p>Put one piece face up in the middle of the card and hold your phone flat above it. A level shows how you're tilted. When the frame turns green and you hold still, the photo takes itself. The light switches on automatically where your phone allows it.</p>
           <p>The outline is traced right on your phone at full camera resolution, with shadows filtered out. You get a preview to check before you move on.</p>
@@ -133,50 +124,28 @@
           </ul>
         </div>
         <figure class="step-art">
-          <svg data-art="scan" viewBox="0 0 300 420" role="img" aria-label="A phone held over the scan card, tracing the outline of a puzzle piece">
-            <rect x="44" y="8" width="212" height="404" rx="34" class="phone"/>
-            <rect x="54" y="20" width="192" height="380" rx="26" class="phone-screen"/>
-            <rect x="75" y="137" width="150" height="150" fill="#000"/>
-            <rect x="87" y="149" width="126" height="126" fill="#fff"/>
-            <rect x="91" y="153" width="118" height="118" fill="#3b3f47"/>
-            <rect x="75" y="137" width="150" height="150" class="scan-frame"/>
-            <g id="scan-piece"></g>
-            <text x="70" y="52" class="phone-label">Piece <tspan font-weight="800" font-size="17">38</tspan></text>
-            <circle cx="214" cy="80" r="18" class="level"/><circle cx="214" cy="80" r="5" class="level-target"/><circle cx="215" cy="79" r="3" class="level-dot"/>
-            <text x="150" y="322" class="phone-guide">Hold still…</text>
-            <circle cx="150" cy="362" r="22" class="shutter"/><circle cx="150" cy="362" r="22" class="shutter-ring" pathLength="1"/>
-          </svg>
+          <svg data-art="scan" viewBox="0 0 320 440" role="img" aria-label="A phone held over the scan card, tracing the outline of a puzzle piece"></svg>
         </figure>
       </article>
 
       <article class="step">
         <div class="step-copy">
-          <span class="step-num">3</span>
+          <span class="step-num">03</span>
           <h3>Number it, keep it</h3>
-          <p>Each scan gets the next number: 1, 2, 3… Pencil it lightly on the back of the piece, or set the piece on a numbered sticky note or in an egg-carton slot. Later, when the app says <em>"38 goes to the left of 112"</em>, you'll know exactly which piece to grab.</p>
+          <p>Each scan gets the next number: 1, 2, 3… Pencil it lightly on the back of the piece, or set the piece on a numbered sticky note or in an egg-carton slot. Later, when the app says <em>"<span data-focus-sentence>42 goes just left of 28</span>"</em>, you'll know exactly which piece to grab.</p>
           <ul class="checks">
             <li>Every piece is <strong>saved the moment you scan it</strong>, so you can stop and pick up later.</li>
             <li>Typo? Labels can be edited, and a bad scan can be redone.</li>
           </ul>
         </div>
         <figure class="step-art">
-          <svg data-art="label" viewBox="0 0 300 300" role="img" aria-label="The back of a puzzle piece with the number 38 written in pencil">
-            <g id="label-piece"><text x="138" y="146" class="pencil-number">38</text></g>
-            <g transform="translate(214 226) rotate(-38)">
-              <rect width="86" height="14" rx="2" fill="#ffb020"/><rect x="72" width="14" height="14" fill="#c9cfdb"/><rect x="86" width="8" height="14" rx="3" fill="#ff8a8a"/>
-              <path d="M0 0L-18 7L0 14z" fill="#f2d8a7"/><path d="M-12 4.7L-18 7L-12 9.3z" fill="#333"/>
-            </g>
-            <g transform="translate(26 236)">
-              <rect width="124" height="36" rx="10" class="chip"/>
-              <text x="62" y="23" class="chip-text">✓ Piece 38 saved</text>
-            </g>
-          </svg>
+          <svg data-art="label" viewBox="0 0 320 290" role="img" aria-label="The back of a puzzle piece with its number written in pencil"></svg>
         </figure>
       </article>
 
       <article class="step">
         <div class="step-copy">
-          <span class="step-num">4</span>
+          <span class="step-num">04</span>
           <h3>Match and solve</h3>
           <p>Open any piece to see its best partners for each side, ranked by how snugly they fit. Or tap <strong>Solve</strong> and the app assembles your catalog into groups: a map of numbered pieces, each in its place, ready for you to build from.</p>
           <ul class="checks">
@@ -185,7 +154,7 @@
           </ul>
         </div>
         <figure class="step-art">
-          <svg data-art="solve" viewBox="0 0 320 300" role="img" aria-label="A map of numbered puzzle outlines with one piece dropping into its place"></svg>
+          <svg data-art="solve" viewBox="0 0 340 310" role="img" aria-label="The app's solution map of numbered puzzle outlines, with piece 42 dropping into its place"></svg>
         </figure>
       </article>
     </section>
@@ -193,30 +162,30 @@
     <section class="band" id="expect">
       <div class="wrap">
         <p class="eyebrow">What to expect</p>
-        <h2 class="section-title">Honest expectations</h2>
+        <h2 class="section-title">Honest <em>expectations</em></h2>
         <div class="expect-grid">
           <div class="expect">
-            <h3>⏱ Scanning is the slow part</h3>
+            <h3>Scanning is the slow part</h3>
             <p>It becomes a rhythm: place, hold, check, number, next. Budget an evening for a few hundred pieces and split big puzzles over several sessions. Solving takes seconds.</p>
           </div>
           <div class="expect">
-            <h3>🎯 You don't have to scan everything</h3>
+            <h3>You don't have to scan everything</h3>
             <p>Only scanned pieces can be matched, so scan the part you're stuck on: all the sky, the border, one tricky colour. A few dozen pieces from the same area is plenty to start.</p>
           </div>
           <div class="expect">
-            <h3>🧩 Shape is everything</h3>
+            <h3>Shape is everything</h3>
             <p>Matching reads only the outline, never the picture. That's why it handles plain areas that are hard by eye. It works best with grid-cut puzzles whose pieces differ in shape (Ravensburger-style). Cuts where many pieces look identical are harder.</p>
           </div>
           <div class="expect">
-            <h3>🧱 Groups, not guesses</h3>
+            <h3>Groups, not guesses</h3>
             <p>The solver is careful. It only joins pieces when every touching side agrees, so expect several solid groups rather than one risky answer. On a 500-piece reference set it put 489 pieces in one group, with 99.8% of neighbours right.</p>
           </div>
           <div class="expect">
-            <h3>🔒 Your photos stay on your phone</h3>
+            <h3>Your photos stay on your phone</h3>
             <p>The image is processed on your device and then thrown away. Only the outline, a list of points, and its number are saved.</p>
           </div>
           <div class="expect">
-            <h3>📱 Just a browser</h3>
+            <h3>Just a browser</h3>
             <p>Open this page on a recent phone with a camera. There's nothing to install. Allow camera access when asked, and you're scanning.</p>
           </div>
         </div>
@@ -226,23 +195,19 @@
     <section class="wrap hood">
       <div class="hood-copy">
         <p class="eyebrow">Under the hood</p>
-        <h2 class="section-title">Why one piece at a time works</h2>
+        <h2 class="section-title">Why <em>one piece at a time</em> works</h2>
         <p>With a single piece on a known card, the app can afford to be precise. It corrects perspective with the card's frame and measures in real millimetres. It separates the piece from its shadow by colour rather than brightness, then traces the edge with sub-pixel accuracy.</p>
         <p>The four corners split the outline into four sides. Each side is checked against every other side by fitting the two shapes together and measuring what's left over, allowing for the hairline gap real neighbours have. The solver then grows groups from the most certain matches and backs out a piece if its neighbours disagree.</p>
+        <p>It's all open source, with the details in the <a href="https://github.com/javierluraschi/puzzle" target="_blank" rel="noopener">GitHub repository</a>.</p>
       </div>
       <figure class="hood-art">
-        <svg data-art="sides" viewBox="0 0 220 210" role="img" aria-label="A puzzle piece with its sides coloured by type: tab, blank and flat edge"></svg>
-        <figcaption class="legend">
-          <span><i class="swatch side-out"></i>tab</span>
-          <span><i class="swatch side-in"></i>blank</span>
-          <span><i class="swatch side-flat"></i>flat edge</span>
-        </figcaption>
+        <svg data-art="sides" viewBox="0 0 300 252" role="img" aria-label="A real edge piece with its four corners marked and its sides named: a flat edge, a blank and two tabs"></svg>
       </figure>
     </section>
 
     <section class="wrap faq" id="faq">
       <p class="eyebrow">FAQ</p>
-      <h2 class="section-title">Good questions</h2>
+      <h2 class="section-title">Good <em>questions</em></h2>
       <details>
         <summary>Do I need an account?</summary>
         <p>Not to look around: the demo works without one. Sign in with Cloudish to keep your catalog safe and open it on any device, for example scanning on your phone and browsing the solution on a laptop. You can also start without an account, but then the puzzle is only remembered by that browser.</p>
@@ -267,10 +232,14 @@
         <summary>Are my pictures uploaded anywhere?</summary>
         <p>No. Photos are processed on your phone and then discarded. The server only receives each piece's outline and label, and uses them to compute matches.</p>
       </details>
+      <details>
+        <summary>Is it open source?</summary>
+        <p>Yes, under the MIT license. The scanner, the matcher and the solver are all on <a href="https://github.com/javierluraschi/puzzle" target="_blank" rel="noopener">GitHub</a>. Stars, issues and pull requests are welcome.</p>
+      </details>
     </section>
 
     <section class="wrap final-cta">
-      <h2>Clear the table. Grab a pencil.<br><span class="accent-text">Let's find where it goes.</span></h2>
+      <h2>Clear the table. Grab a pencil. <em>Let's find where it goes.</em></h2>
       <div class="cta for-guest">
         <div class="cta-row">
           <a class="button primary big" data-signin href="/auth/login">Sign in to start a puzzle</a>
@@ -292,17 +261,18 @@
   <footer class="site-footer">
     <div class="wrap footer-grid">
       <div>
-        <a href="/" class="brand" data-link><img src="/favicon.svg" alt="" width="24" height="24"> Jigsaw Scanner</a>
+        <a href="/" class="brand" data-link><img src="/favicon.svg" alt="" width="24" height="24"> Puzzle Solver</a>
         <p class="muted small">Scan your pieces. See what fits.</p>
       </div>
       <nav class="footer-links">
         <a href="/#how">How it works</a>
         <a href="/card.html" target="_blank">Scan card</a>
         <a href="/#faq">FAQ</a>
+        <a href="https://github.com/javierluraschi/puzzle" target="_blank" rel="noopener">★ Star on GitHub</a>
       </nav>
       <p class="hosted">Hosted on <a href="https://cloudish.ai" target="_blank" rel="noopener">cloudish.ai</a>. Thanks to Cloudish for hosting and sign-in.</p>
     </div>
-    <p class="wrap credits">The original analysis and solver, the reference solutions used for validation, and the demo pieces come from <a href="https://github.com/byWulf/jigsawlutioner" target="_blank" rel="noopener">jigsawlutioner</a> by Michael Wolf (MIT).</p>
+    <p class="wrap credits">Open source under the MIT license. The original analysis and solver, the reference solutions used for validation, and the demo pieces come from <a href="https://github.com/byWulf/jigsawlutioner" target="_blank" rel="noopener">jigsawlutioner</a> by Michael Wolf (MIT). Headings are set in <a href="https://github.com/undercasetype/Fraunces" target="_blank" rel="noopener">Fraunces</a> (OFL).</p>
   </footer>
   <div id="scanner-host" hidden></div>
 
