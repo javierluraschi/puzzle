@@ -8,6 +8,8 @@
 // the whole edge (~0.1-0.3 mm on phone photos, ~0 on flatbed scans). The comparison therefore fits
 // a rigid motion plus such a uniform offset; the score is the remaining shape mismatch (RMS, mm)
 // over the middle of the side, plus a penalty for an offset far from the puzzle's typical one.
+// That gap differs between scanning sessions (light), so each piece gets its own share of it
+// (estimatePieceGaps). Sides next to a flat side only pair with sides that continue the border.
 // The ends of the side are checked separately: true neighbours meet corner to corner, so ends that
 // overshoot or bend away from the other side are penalized (see endMismatch).
 
@@ -24,6 +26,10 @@ const CORNER_WEIGHT = env('MATCH_CORNER_WEIGHT', 0.3);
 const CORNER_TOLERANCE = env('MATCH_CORNER_TOLERANCE', 0.6); // mm
 const TAIL_WEIGHT = env('MATCH_TAIL_WEIGHT', 0.5);
 const TAIL_TOLERANCE = env('MATCH_TAIL_TOLERANCE', 0.2); // mm
+const BORDER_CHECK = env('MATCH_BORDER', 1) === 1;
+const PIECE_GAPS = env('MATCH_PIECE_GAPS', 1) === 1;
+const GAP_WINDOW = env('MATCH_GAP_WINDOW', 15); // pieces before and after in scanning order
+const GAP_PRIOR = env('MATCH_GAP_PRIOR', 12); // weight of that neighbourhood, in fits
 
 export function complementary(a, b) {
   return (a.type === 'out' && b.type === 'in') || (a.type === 'in' && b.type === 'out');
@@ -34,6 +40,17 @@ export function plausible(a, b) {
   if (!complementary(a, b)) return false;
   const L = Math.max(a.length, b.length);
   return Math.abs(a.length - b.length) < 0.08 * L && Math.abs(Math.abs(a.depth) - Math.abs(b.depth)) < 0.15 * L;
+}
+
+/**
+ * Border consistency of mating side s of piece pa with side t of piece pb: when A's side before s
+ * is flat the two pieces lie along the puzzle's border, so B's side after t must be flat too (and
+ * the other way round); a flat next to only one of them cannot be.
+ */
+export function borderCompatible(pa, s, pb, t) {
+  if (!BORDER_CHECK) return true;
+  const flat = (piece, k) => piece.sides[(k + 4) % 4].type === 'flat';
+  return flat(pa, s - 1) === flat(pb, t + 1) && flat(pa, s + 1) === flat(pb, t - 1);
 }
 
 /** B's curve as it lies when mated to A, in A's frame. */
@@ -175,26 +192,77 @@ export function candidateTable(pieces, { keep = 12, refine = 16 } = {}) {
   const sides = [];
   for (const [index, piece] of pieces) {
     if (!piece.ok) continue;
-    piece.sides.forEach((side, s) => sides.push({ index, s, side }));
+    piece.sides.forEach((side, s) => sides.push({ index, s, side, piece }));
   }
   const raw = new Map();
   for (const A of sides) {
     const quick = [];
     for (const B of sides) {
-      if (B.index === A.index || !plausible(A.side, B.side)) continue;
+      if (B.index === A.index || !plausible(A.side, B.side) || !borderCompatible(A.piece, A.s, B.piece, B.s)) continue;
       quick.push({ B, q: quickScore(A.side, B.side) });
     }
     quick.sort((x, y) => x.q - y.q);
     raw.set(`${A.index}_${A.s}`, quick.slice(0, refine).map(({ B }) => ({ piece: B.index, side: B.s, ...sideFit(A.side, B.side) })));
   }
   const typicalOffset = estimateTypicalOffset(raw);
+  const gaps = PIECE_GAPS ? estimatePieceGaps(raw, typicalOffset) : null;
+  const expected = (i, j) => (gaps ? (gaps.get(i) ?? typicalOffset / 2) + (gaps.get(j) ?? typicalOffset / 2) : typicalOffset);
   const table = new Map();
   for (const [key, list] of raw) {
-    const scored = list.map((c) => ({ piece: c.piece, side: c.side, score: round(combine(c, typicalOffset)), residual: round(c.residual), offset: round(c.offset) }));
+    const i = Number(key.split('_')[0]);
+    const scored = list.map((c) => ({ piece: c.piece, side: c.side, score: round(combine(c, expected(i, c.piece))), residual: round(c.residual), offset: round(c.offset) }));
     scored.sort((x, y) => x.score - y.score);
     table.set(key, scored.slice(0, keep));
   }
-  return { table, typicalOffset };
+  return { table, typicalOffset, gaps: gaps ? Object.fromEntries([...gaps].map(([i, g]) => [i, round(g)])) : null };
+}
+
+/**
+ * Each piece's own share of the gap: how far inside the cut its traced outline lies depends on the
+ * light when it was scanned, so pieces from one scanning session share a gap that another session
+ * does not. The gap of a pair is the sum of both shares; the shares are fitted to the offsets of
+ * clear mutual-best fits, each pulled towards the shares of the pieces scanned around the same time
+ * (and half the typical gap), so pieces with little evidence of their own follow their session.
+ */
+export function estimatePieceGaps(raw, typicalOffset, { margin = 1.5, prior = GAP_PRIOR, window = GAP_WINDOW, sweeps = 20 } = {}) {
+  const best = new Map();
+  for (const [key, list] of raw) {
+    const scored = list.map((c) => ({ c, s: combine(c, typicalOffset) })).sort((x, y) => x.s - y.s);
+    if (scored.length) best.set(key, { ...scored[0], second: scored[1]?.s ?? Infinity });
+  }
+  const pairs = [];
+  for (const [key, b] of best) {
+    const [i] = key.split('_').map(Number);
+    const back = best.get(`${b.c.piece}_${b.c.side}`);
+    if (!back || back.c.piece !== i || `${back.c.piece}_${back.c.side}` !== key || i > b.c.piece) continue;
+    if (b.second / b.s < margin || back.second / back.s < margin) continue;
+    pairs.push([i, b.c.piece, (b.c.offset + back.c.offset) / 2]);
+  }
+  const gaps = new Map();
+  const half = typicalOffset / 2;
+  for (const key of raw.keys()) gaps.set(Number(key.split('_')[0]), half);
+  // pieces scanned one after the other (consecutive indexes) were lit alike: their prior is the
+  // mean share of their neighbours in scanning order
+  const order = [...gaps.keys()].sort((x, y) => x - y);
+  const position = new Map(order.map((i, k) => [i, k]));
+  const near = (i) => order.slice(Math.max(0, position.get(i) - window), position.get(i) + window + 1).filter((j) => j !== i);
+  for (let sweep = 0; sweep < sweeps; sweep++) {
+    const sum = new Map();
+    const count = new Map();
+    for (const [i, j, o] of pairs) {
+      sum.set(i, (sum.get(i) || 0) + o - gaps.get(j));
+      count.set(i, (count.get(i) || 0) + 1);
+      sum.set(j, (sum.get(j) || 0) + o - gaps.get(i));
+      count.set(j, (count.get(j) || 0) + 1);
+    }
+    const previous = new Map(gaps);
+    for (const i of gaps.keys()) {
+      const around = window ? near(i).map((j) => previous.get(j)) : [];
+      const base = around.length ? (around.reduce((x, y) => x + y, 0) + half) / (around.length + 1) : half;
+      gaps.set(i, (prior * base + (sum.get(i) || 0)) / (prior + (count.get(i) || 0)));
+    }
+  }
+  return gaps;
 }
 
 /** The usual gap between true neighbours: the median offset of mutual best, clean fits. */
@@ -266,9 +334,9 @@ export function candidatesFor(pieces, index, { typicalOffset = null, keep = 8, r
   const piece = pieces.get(index);
   if (!piece?.ok) return [];
   const others = [];
-  for (const [j, p] of pieces) if (j !== index && p.ok) p.sides.forEach((side, t) => others.push({ j, t, side }));
-  const raw = piece.sides.map((side) => {
-    const quick = others.filter((o) => plausible(side, o.side)).map((o) => ({ o, q: quickScore(side, o.side) }));
+  for (const [j, p] of pieces) if (j !== index && p.ok) p.sides.forEach((side, t) => others.push({ j, t, side, p }));
+  const raw = piece.sides.map((side, s) => {
+    const quick = others.filter((o) => plausible(side, o.side) && borderCompatible(piece, s, o.p, o.t)).map((o) => ({ o, q: quickScore(side, o.side) }));
     quick.sort((x, y) => x.q - y.q);
     return quick.slice(0, refine).map(({ o }) => ({ piece: o.j, side: o.t, ...sideFit(side, o.side) }));
   });

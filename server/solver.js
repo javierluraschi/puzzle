@@ -35,7 +35,9 @@ const rotateCell = ([x, y], q) => {
 };
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
-export function solve(pieces, { table, typicalOffset = 0 }, { onProgress = () => {}, onReject = null } = {}) {
+export function solve(pieces, { table, typicalOffset = 0, gaps = null }, { onProgress = () => {}, onReject = null } = {}) {
+  // the gap expected between two pieces: the sum of their shares when known (see estimatePieceGaps)
+  const gap = (i, j) => (gaps ? (gaps[i] ?? typicalOffset / 2) + (gaps[j] ?? typicalOffset / 2) : typicalOffset);
   const ok = [...pieces].filter(([, p]) => p.ok);
   const sizes = ok.map(([, p]) => p.sizeMm).sort((a, b) => a - b);
   const k = sizes.length ? sizes[Math.floor(sizes.length / 2)] / 15 : 1;
@@ -77,7 +79,7 @@ export function solve(pieces, { table, typicalOffset = 0 }, { onProgress = () =>
       const b = pieces.get(j).sides[t];
       const ab = sideFit(a, b);
       const ba = sideFit(b, a);
-      fits.set(key, { score: (combine(ab, typicalOffset) + combine(ba, typicalOffset)) / 2, pose: ab.pose });
+      fits.set(key, { score: (combine(ab, gap(i, j)) + combine(ba, gap(i, j))) / 2, pose: ab.pose });
     }
     return fits.get(key);
   };
@@ -124,12 +126,13 @@ export function solve(pieces, { table, typicalOffset = 0 }, { onProgress = () =>
     // m's side curve -> m's piece -> group -> o's piece -> o's side frame
     const toA = compose(geo.get(o).frames[so].toSide, compose(invert(po), compose(pm, geo.get(m).frames[sm].fromSide)));
     const n = b.points.length;
+    const g = gap(m, o);
     let sum = 0;
     let count = 0;
     for (let q = INNER[0]; q < INNER[1]; q += 2) {
       const p = apply(toA, b.points[n - 1 - q]);
       const near = nearestOnA(a.points, p, q, 6);
-      sum += (near.signed - typicalOffset) ** 2;
+      sum += (near.signed - g) ** 2;
       count++;
     }
     return Math.sqrt(sum / count);
@@ -209,12 +212,13 @@ export function solve(pieces, { table, typicalOffset = 0 }, { onProgress = () =>
           const fromA = compose(po.pose, geo.get(o).frames[so].fromSide);
           const n = b.points.length;
           const local = [];
+          const g = gap(m, o);
           let sum = 0;
           for (let q = INNER[0]; q < INNER[1]; q += 3) {
             const pt = apply(toA, b.points[n - 1 - q]);
             const near = nearestOnA(a.points, pt, q);
-            sum += (near.signed - typicalOffset) ** 2;
-            local.push([apply(fromA, pt), apply(fromA, [near.q[0] + near.n[0] * typicalOffset, near.q[1] + near.n[1] * typicalOffset])]);
+            sum += (near.signed - g) ** 2;
+            local.push([apply(fromA, pt), apply(fromA, [near.q[0] + near.n[0] * g, near.q[1] + near.n[1] * g])]);
           }
           if (Math.sqrt(sum / local.length) > T.posed * 2.5) continue; // probably a wrong contact
           for (const [x, y] of local) { from.push(x); to.push(y); }
@@ -445,11 +449,12 @@ export function solve(pieces, { table, typicalOffset = 0 }, { onProgress = () =>
           const toA = compose(geo.get(o).frames[so].toSide, compose(invert(po.pose), compose(p.pose, geo.get(m).frames[sm].fromSide)));
           const fromA = compose(po.pose, geo.get(o).frames[so].fromSide);
           const n = b.points.length;
+          const go = gap(m, o);
           for (let q = INNER[0]; q < INNER[1]; q += 4) {
             const pt = apply(toA, b.points[n - 1 - q]);
             const near = nearestOnA(a.points, pt, q);
             from.push(apply(fromA, pt));
-            to.push(apply(fromA, [near.q[0] + near.n[0] * typicalOffset, near.q[1] + near.n[1] * typicalOffset]));
+            to.push(apply(fromA, [near.q[0] + near.n[0] * go, near.q[1] + near.n[1] * go]));
           }
           contacts++;
         }
