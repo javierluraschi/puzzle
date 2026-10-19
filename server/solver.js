@@ -27,6 +27,8 @@ const MARGIN = env('SOLVE_MARGIN', 1.25); // single contact: best must beat the 
 const ANGLE = (env('SOLVE_ANGLE', 8) * Math.PI) / 180; // grid alignment tolerance
 const HALF_CONFIDENCE = 0.12;
 const BIG_GROUP = env('SOLVE_BIG', 20); // groups at least this big are joined by topology
+const PAIR = env('SOLVE_PAIR', 0.3); // every contact's own (re-aligned) match score
+const BORDER = env('SOLVE_BORDER', 1) === 1; // pieces along a border must agree on its flat sides
 
 const facing = (r, d) => (d - r + 8) % 4;
 const rotateCell = ([x, y], q) => {
@@ -42,7 +44,7 @@ export function solve(pieces, { table, typicalOffset = 0, gaps = null }, { onPro
   const sizes = ok.map(([, p]) => p.sizeMm).sort((a, b) => a - b);
   const k = sizes.length ? sizes[Math.floor(sizes.length / 2)] / 15 : 1;
   // backlit/flatbed outlines of neighbours overlap a little (negative typical gap): allow that too
-  const T = { strict: STRICT * k, loose: LOOSE * k, posed: POSED * k, overlap: OVERLAP * k + Math.max(0, -typicalOffset) };
+  const T = { strict: STRICT * k, loose: LOOSE * k, posed: POSED * k, pair: PAIR * k, overlap: OVERLAP * k + Math.max(0, -typicalOffset) };
 
   // geometry per piece: outline samples for overlap tests, side frames
   const geo = new Map();
@@ -137,6 +139,10 @@ export function solve(pieces, { table, typicalOffset = 0, gaps = null }, { onPro
     }
     return Math.sqrt(sum / count);
   };
+
+  /** Pieces stacked along the border both have its flat side facing out (and others neither). */
+  const borderAgrees = (m, rm, o, ro, dir) => [(dir + 1) % 4, (dir + 3) % 4].every((d) =>
+    (pieces.get(m).sides[facing(rm, d)].type === 'flat') === (pieces.get(o).sides[facing(ro, d)].type === 'flat'));
 
   /** Does m (pose pm) penetrate o (pose po) deeper than the tolerance, or vice versa? */
   const overlaps = (m, pm, o, po) => {
@@ -351,7 +357,17 @@ export function solve(pieces, { table, typicalOffset = 0, gaps = null }, { onPro
         const sm = facing(p.r, dir);
         const so = facing(po.r, (dir + 2) % 4);
         const flat = pieces.get(m).sides[sm].type === 'flat' || pieces.get(o).sides[so].type === 'flat';
+        if (!flat && BORDER && !borderAgrees(m, p.r, o, po.r, dir)) {
+          conflicts.push([m, o, 'border']);
+          continue;
+        }
         const fitHere = flat ? Infinity : posedFit(m, sm, p.pose, o, so, po.pose);
+        // a contact must also be a fair match on its own (re-aligned, so pose drift does not matter;
+        // the score includes edge ends that do not meet)
+        if (!flat && fitOf(o, so, m, sm).score > T.pair) {
+          conflicts.push([m, o, 'pair']);
+          continue;
+        }
         if (fitHere <= T.posed) good++;
         // slightly off at the current poses (drift in big groups) but a good fit when re-aligned:
         // fine once the poses are relaxed
@@ -388,6 +404,7 @@ export function solve(pieces, { table, typicalOffset = 0, gaps = null }, { onPro
           const o = gi.cells.get(`${p.x + D[dir][0]},${p.y + D[dir][1]}`);
           if (o === undefined) continue;
           const po = gi.members.get(o);
+          if (BORDER && !borderAgrees(m, p.r, o, po.r, dir)) return `after-evict/sizes:${gi.members.size}+${gj.members.size}`;
           if (posedFit(m, facing(p.r, dir), p.pose, o, facing(po.r, (dir + 2) % 4), po.pose) > T.posed) return `after-evict/sizes:${gi.members.size}+${gj.members.size}`;
         }
         for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
