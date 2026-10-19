@@ -1,9 +1,10 @@
 // Illustrations for the landing page, drawn from real pieces: the 54-piece demo set as this app scanned
 // and solved it (/demo/landing.json, made by tools/make_landing_data.mjs). Outlines are in millimetres,
-// placed where the solver put them. The picture on the pieces is /scene.svg, laid over the solved board.
+// placed where the solver put them. The picture on the pieces is Van Gogh's The Starry Night (public
+// domain), laid over the solved board: one of the hardest images to do as a jigsaw by eye.
 
 const NS = 'http://www.w3.org/2000/svg';
-const SCENE = { url: '/scene.svg', width: 420, height: 336 };
+const SCENE = { url: '/starry-night.jpg', width: 1000, height: 792 };
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElementNS(NS, tag);

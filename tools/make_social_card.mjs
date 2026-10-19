@@ -27,12 +27,14 @@ const card = `
   .og .hp-tag, .og .hero-ring, .og .hp-lift { opacity: 0; }
   .og .hp-last { transform: translate(58px, -70px) rotate(14deg); }
   .og .hp-last .hp-lift { opacity: 1; }
+  .og .hp-last { filter: drop-shadow(0 12px 16px rgba(20, 20, 60, 0.5)); }
+  .og .hp-last .piece-seam { stroke: var(--accent); stroke-width: 3; }
 </style>
 <div class="og">
   <div>
     <div class="og-brand"><img src="/favicon.svg" width="48" height="48" alt=""> Puzzle Solver</div>
     <h1>That piece fits somewhere. <span class="h1-turn">Your phone knows <em class="swoosh">where<svg viewBox="0 0 200 24" preserveAspectRatio="none"><path d="M4 16C52 6 128 4 196 11" pathLength="1"/></svg></em>.</span></h1>
-    <p>Print the scan card, scan your pieces one by one, and see exactly which ones fit together.</p>
+    <p>Built for the hard ones, like <em>The Starry Night</em>. Scan your pieces one by one and see exactly which ones fit.</p>
     <span class="og-url">puzzle.cloudish.app</span>
   </div>
   <div class="hero-stage" data-art="hero"></div>

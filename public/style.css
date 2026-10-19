@@ -288,6 +288,7 @@ html.on-puzzle #home, html.on-puzzle .topnav { display: none; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
 .hero-copy .lead { font-size: 1.15rem; color: var(--muted); }
 .hero-art { margin: 0; }
+.hero-art figcaption { max-width: 28rem; margin: 0.4rem auto 0; color: var(--muted); font-size: 0.82rem; line-height: 1.45; text-align: center; }
 
 .cta { margin-top: 1.8rem; }
 .cta-row { display: flex; flex-wrap: wrap; gap: 0.7rem; }
@@ -308,7 +309,7 @@ body.signed-in .for-guest, body:not(.signed-in) .for-member { display: none; }
 .hp-lift { position: absolute; inset: 0; filter: blur(8px); transform: translate(8px, 16px); animation: lift 12s ease var(--d) infinite both; }
 .hp-lift-shape { position: absolute; inset: 0; background: rgba(70, 45, 10, 0.38); }
 .hp-face, .hp-bevel { position: absolute; inset: 0; }
-.bevel-light { fill: none; stroke: rgba(255, 255, 255, 0.42); stroke-width: 2; }
+.bevel-light { fill: none; stroke: rgba(255, 255, 255, 0.34); stroke-width: 2; }
 .bevel-dark { fill: none; stroke: rgba(50, 30, 0, 0.24); stroke-width: 2; }
 .piece-seam { fill: none; stroke: rgba(40, 25, 0, 0.32); stroke-width: 0.7; }
 .hp-tag { position: absolute; left: 50%; top: 50%; width: 24px; height: 24px; margin: -12px; border-radius: 50%; background: #fff; color: var(--text); font: 700 10.5px/24px var(--font-mono); text-align: center; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transform: rotate(var(--tr)); animation: tag 12s ease var(--d) infinite both; }

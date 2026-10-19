@@ -10,14 +10,14 @@
   <meta property="og:site_name" content="Puzzle Solver">
   <meta property="og:url" content="https://puzzle.cloudish.app/">
   <meta property="og:title" content="Puzzle Solver – scan your jigsaw pieces, see where they go">
-  <meta property="og:description" content="Print the scan card, scan your pieces one by one, and let your phone work out exactly which ones fit together.">
+  <meta property="og:description" content="Built for the hard ones, like The Starry Night. Print the scan card, scan your pieces one by one, and let your phone work out exactly which ones fit together.">
   <meta property="og:image" content="https://puzzle.cloudish.app/social-card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Puzzle Solver: That piece fits somewhere. Your phone knows where.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Puzzle Solver – scan your jigsaw pieces, see where they go">
-  <meta name="twitter:description" content="Print the scan card, scan your pieces one by one, and let your phone work out exactly which ones fit together.">
+  <meta name="twitter:description" content="Built for the hard ones, like The Starry Night. Print the scan card, scan your pieces one by one, and let your phone work out exactly which ones fit together.">
   <meta name="twitter:image" content="https://puzzle.cloudish.app/social-card.png">
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Puzzle Solver","url":"https://puzzle.cloudish.app/","applicationCategory":"GameApplication","operatingSystem":"Any (web browser)","codeRepository":"https://github.com/javierluraschi/puzzle","description":"A jigsaw puzzle solver: scan pieces one at a time on a printed card; the app traces every outline on your phone and works out which pieces fit together."}</script>
   <meta name="theme-color" content="#f8f4ec">
@@ -48,9 +48,9 @@
     <section class="hero-band">
       <div class="wrap hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow">A jigsaw puzzle solver for your phone</p>
+          <p class="eyebrow">A jigsaw puzzle solver for the hard ones</p>
           <h1>That piece fits somewhere. <span class="h1-turn">Your phone knows <em class="swoosh">where<svg viewBox="0 0 200 24" preserveAspectRatio="none" aria-hidden="true"><path d="M4 16C52 6 128 4 196 11" pathLength="1"/></svg></em>.</span></h1>
-          <p class="lead">Scan your pieces one at a time on a printed card. Puzzle Solver traces each outline to a fraction of a millimetre, reads all four sides, and works out which pieces lock together, even in a sky that's all the same blue.</p>
+          <p class="lead">Scan your pieces one at a time on a printed card. Puzzle Solver traces each outline to a fraction of a millimetre, reads all four sides, and works out which pieces lock together. It's built for the hard ones: endless sky, swirling paint, hundreds of pieces that all look alike.</p>
 
           <div class="cta for-guest">
             <div class="cta-row">
@@ -63,7 +63,7 @@
           <div class="cta for-member">
             <p class="welcome">Welcome back<span id="member-name"></span>. What are we solving today?</p>
             <form class="start-form" id="start-form">
-              <input name="name" placeholder="Puzzle name, e.g. Balloons over Provence" maxlength="80" autocomplete="off" aria-label="Puzzle name">
+              <input name="name" placeholder="Puzzle name, e.g. The Starry Night" maxlength="80" autocomplete="off" aria-label="Puzzle name">
               <button class="primary" type="submit">Start a puzzle</button>
             </form>
             <button class="link-button" data-action="demo">or open a demo catalog of 54 real pieces →</button>
@@ -71,7 +71,8 @@
           <p class="error" id="home-error" hidden></p>
         </div>
         <figure class="hero-art">
-          <div class="hero-stage" data-art="hero" role="img" aria-label="Fifty-four numbered puzzle pieces moving from a pile into their solved places, forming a picture of hot-air balloons over the countryside"></div>
+          <div class="hero-stage" data-art="hero" role="img" aria-label="Fifty-four numbered puzzle pieces moving from a pile into their solved places, forming Van Gogh's The Starry Night"></div>
+          <figcaption><em>The Starry Night</em>, Vincent van Gogh, 1889: widely considered one of the hardest jigsaw puzzles you can attempt. Shown on the outlines of 54 real pieces from our demo, placed where the solver put them.</figcaption>
         </figure>
       </div>
     </section>
@@ -174,7 +175,7 @@
           </div>
           <div class="expect">
             <h3>Shape is everything</h3>
-            <p>Matching reads only the outline, never the picture. That's why it handles plain areas that are hard by eye. It works best with grid-cut puzzles whose pieces differ in shape (Ravensburger-style). Cuts where many pieces look identical are harder.</p>
+            <p>Matching reads only the outline, never the picture. The swirls that make <em>The Starry Night</em> so hard by eye don't confuse it, and neither does a plain sky. It works best with grid-cut puzzles whose pieces differ in shape (Ravensburger-style). Cuts where many pieces look identical are harder.</p>
           </div>
           <div class="expect">
             <h3>Groups, not guesses</h3>
@@ -222,7 +223,7 @@
       </details>
       <details>
         <summary>Which puzzles work best?</summary>
-        <p>Classic grid-cut puzzles where each piece has four sides with tabs and blanks, and the shapes vary from piece to piece. Puzzles with many identical shapes, or irregular "random cut" pieces, are much harder because shape is all the app looks at.</p>
+        <p>Classic grid-cut puzzles where each piece has four sides with tabs and blanks, and the shapes vary from piece to piece. Puzzles with many identical shapes, or irregular "random cut" pieces, are much harder because shape is all the app looks at. What's hard by eye is fine: night skies, oceans, paintings like <em>The Starry Night</em>. That's where the app helps most.</p>
       </details>
       <details>
         <summary>What if a scan comes out wrong?</summary>
@@ -272,7 +273,7 @@
       </nav>
       <p class="hosted">Hosted on <a href="https://cloudish.ai" target="_blank" rel="noopener">cloudish.ai</a>. Thanks to Cloudish for hosting and sign-in.</p>
     </div>
-    <p class="wrap credits">Open source under the MIT license. The original analysis and solver, the reference solutions used for validation, and the demo pieces come from <a href="https://github.com/byWulf/jigsawlutioner" target="_blank" rel="noopener">jigsawlutioner</a> by Michael Wolf (MIT). Headings are set in <a href="https://github.com/undercasetype/Fraunces" target="_blank" rel="noopener">Fraunces</a> (OFL).</p>
+    <p class="wrap credits">Open source under the MIT license. The original analysis and solver, the reference solutions used for validation, and the demo pieces come from <a href="https://github.com/byWulf/jigsawlutioner" target="_blank" rel="noopener">jigsawlutioner</a> by Michael Wolf (MIT). Headings are set in <a href="https://github.com/undercasetype/Fraunces" target="_blank" rel="noopener">Fraunces</a> (OFL). <em>The Starry Night</em> by Vincent van Gogh (1889, Museum of Modern Art) is in the public domain; image via <a href="https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg" target="_blank" rel="noopener">Wikimedia Commons</a>.</p>
   </footer>
   <div id="scanner-host" hidden></div>
 

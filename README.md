@@ -94,7 +94,8 @@ action once the account is known. Headings use [Fraunces](https://github.com/und
 
 Its illustrations (`public/landing.js`) are drawn from real data rather than mock-ups:
 `public/demo/landing.json` is the 54-piece demo as this app analyzed and solved it, with outlines in
-millimetres where the solver placed them. The picture on the pieces is `public/scene.svg`. The hero
+millimetres where the solver placed them. The picture on the pieces is Van Gogh's *The Starry Night*
+(`public/starry-night.jpg`, public domain), widely considered one of the hardest jigsaw puzzles there is. The hero
 assembles the solved board from a pile, and the step illustrations follow one piece (42) with its real
 neighbours and match confidences. The hero pieces are HTML layers clipped to their outlines, so the
 animation moves cached layers instead of repainting the picture every frame.
@@ -125,4 +126,6 @@ and rolls it out. It needs `CLOUDISH_API_KEY` in `.env`.
 [jigsawlutioner-cli](https://github.com/byWulf/jigsawlutioner-cli) by Michael Wolf (MIT): the
 original analysis/solver, the reference results used for validation, and the demo pieces.
 [Fraunces](https://github.com/undercasetype/Fraunces) by the Fraunces Project Authors (OFL) for
-headings. Hosted on [Cloudish](https://cloudish.ai).
+headings. *The Starry Night* by Vincent van Gogh (1889, Museum of Modern Art), public domain, image via
+[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg).
+Hosted on [Cloudish](https://cloudish.ai).
