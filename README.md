@@ -1,6 +1,6 @@
 # Jigsaw Scanner
 
-Live at **https://jigsawsolver.on.do.cloudish.ai/**
+Live at **https://puzzle.cloudish.app/**
 
 Scan jigsaw pieces one at a time with a phone camera on a printed scan card. The app traces each
 piece's exact outline on the device and stores only that 2D contour plus a label. The Node server

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the image on Cloudish from this directory and redeploys https://jigsawsolver.on.do.cloudish.ai/
+# Builds the image on Cloudish from this directory and redeploys https://puzzle.cloudish.app/
 set -euo pipefail
 cd "$(dirname "$0")"
 source .env
