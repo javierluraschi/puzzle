@@ -309,6 +309,9 @@ async function showPuzzle(id) {
   for (const control of ['show-numbers', 'show-links', 'show-singles', 'zoom']) {
     document.getElementById(control).addEventListener('input', renderSolution);
   }
+  const find = document.getElementById('find-piece');
+  find.addEventListener('input', () => findPiece());
+  find.addEventListener('keydown', (event) => { if (event.key === 'Enter') findPiece(); });
 
   renderPieces();
 
@@ -642,10 +645,44 @@ function renderSolution() {
     const singlePieces = singles.map((index) => state.pieces.get(index)).filter(Boolean);
     nodes.push(h('div', { class: 'group' }, h('div', { class: 'group-head' }, h('h3', {}, 'Not placed'), h('span', { class: 'muted' }, singles.length + ' pieces')),
       showSingles
-        ? h('div', { class: 'piece-grid' }, singlePieces.map((piece) => h('button', { class: 'piece-card', onclick: () => showPieceDetails(piece.index) }, pieceSvg(piece, { zoom: 2.2 }), h('span', { class: 'piece-number' }, piece.label))))
-        : h('p', { class: 'muted small' }, singlePieces.map((p) => '#' + p.label).join(', '))));
+        ? h('div', { class: 'piece-grid' }, singlePieces.map((piece) => h('button', { class: 'piece-card', 'data-piece': piece.index, onclick: () => showPieceDetails(piece.index) }, pieceSvg(piece, { zoom: 2.2 }), h('span', { class: 'piece-number' }, piece.label))))
+        : h('p', { class: 'muted small' }, singlePieces.flatMap((p, i) => [i ? ', ' : null, h('span', { class: 'single-label', 'data-piece': p.index }, '#' + p.label)]))));
   }
   container.replaceChildren(...nodes);
+  findPiece({ scroll: false });
+}
+
+/** Highlights the pieces whose label is typed in the find box and scrolls the first one into view. */
+function findPiece({ scroll = true } = {}) {
+  const container = document.getElementById('solution');
+  const result = document.getElementById('find-result');
+  if (!container || !result || !state.solution) return;
+  const query = document.getElementById('find-piece').value.trim().replace(/^#/, '').toLowerCase();
+  for (const el of container.querySelectorAll('.found')) el.classList.remove('found');
+  void container.offsetWidth; // restart the pulse when the same piece is searched again
+  const matches = query ? sortedPieces().filter((p) => (p.label ?? '').toLowerCase() === query) : [];
+  const found = matches.flatMap((p) => [...container.querySelectorAll(`[data-piece="${p.index}"]`)]);
+  found.forEach((el) => el.classList.add('found'));
+  for (const board of container.querySelectorAll('.board')) board.classList.toggle('searching', found.length > 0);
+  if (!query) result.replaceChildren();
+  else if (!matches.length) result.replaceChildren(h('span', { class: 'warn' }, `No piece labeled ${query}`));
+  else result.replaceChildren(matches.map((p) => `#${p.label}: ${locatePiece(p.index)}`).join(' · '));
+  if (scroll && found.length) found[0].scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+}
+
+/** Where a piece ended up in the solution, in the rows and columns of its (rotated) group. */
+function locatePiece(index) {
+  const groups = state.solution.groups.filter((g) => g.placements.length > 1);
+  for (const [i, group] of groups.entries()) {
+    const cells = group.placements.filter((p) => state.pieces.get(p.piece)?.ok && p.pose).map((p) => rotatePlacement(p, state.groupRotations.get(i) || 0));
+    const cell = cells.find((c) => c.piece === index);
+    if (!cell) continue;
+    const row = cell.y - Math.min(...cells.map((c) => c.y)) + 1;
+    const column = cell.x - Math.min(...cells.map((c) => c.x)) + 1;
+    return `${i === 0 ? 'biggest group' : `group ${i + 1}`}, row ${row}, column ${column}`;
+  }
+  if (state.solution.groups.some((g) => g.placements.length === 1 && g.placements[0].piece === index)) return 'not placed';
+  return 'not in this solution – solve again to include it';
 }
 
 function renderGroup(group, groupIndex, zoom, showNumbers, showLinks) {
@@ -687,13 +724,13 @@ function renderGroup(group, groupIndex, zoom, showNumbers, showLinks) {
   for (const p of placements) {
     const piece = state.pieces.get(p.piece);
     const m = matrices.get(p.piece);
-    const g = svgEl('g', { transform: `matrix(${m.map((v) => v.toFixed(5)).join(' ')})`, class: 'board-piece' }, svgEl('path', { class: 'piece-fill', d: pathData(piece.outline), 'vector-effect': 'non-scaling-stroke' }));
+    const g = svgEl('g', { transform: `matrix(${m.map((v) => v.toFixed(5)).join(' ')})`, class: 'board-piece', 'data-piece': p.piece }, svgEl('path', { class: 'piece-fill', d: pathData(piece.outline), 'vector-effect': 'non-scaling-stroke' }));
     g.addEventListener('click', () => showPieceDetails(p.piece));
     content.append(g);
     centers.set(`${p.x},${p.y}`, screen(map(m, piece.center)));
     if (showNumbers) {
       const [x, y] = screen(map(m, piece.center));
-      labels.append(svgEl('text', { x: x.toFixed(1), y: y.toFixed(1), class: 'piece-label', 'font-size': Math.max(7, Math.min(16, 4.7 * zoom)).toFixed(1) }, document.createTextNode(piece.label)));
+      labels.append(svgEl('text', { x: x.toFixed(1), y: y.toFixed(1), class: 'piece-label', 'data-piece': p.piece, 'font-size': Math.max(7, Math.min(16, 4.7 * zoom)).toFixed(1) }, document.createTextNode(piece.label)));
     }
   }
   if (showLinks) {
@@ -748,5 +785,9 @@ function rotatePlacement(p, times) {
   }
   return { ...p, x, y, top };
 }
+
+// sticky bars below the top bar (the solve options) need its height, which changes when it wraps
+const topbar = document.querySelector('.topbar');
+new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-height', topbar.offsetHeight + 'px')).observe(topbar);
 
 loadAccount().then(route);
